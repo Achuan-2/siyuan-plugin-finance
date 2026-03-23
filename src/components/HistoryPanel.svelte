@@ -233,7 +233,7 @@
     function updateChart() {
         if (!chartInstance || !filteredData.length) return;
 
-        const color = '#FFD700'; // 黄色曲线
+        const color = '#d4a951'; // 曲线颜色
         
         const dates = filteredData.map(d => formatDate(d.timestamp));
         const prices = filteredData.map(d => d.midprice);
@@ -326,8 +326,8 @@
                     },
                     areaStyle: {
                         color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                            { offset: 0, color: 'rgba(255, 215, 0, 0.3)' },
-                            { offset: 1, color: 'rgba(255, 215, 0, 0.05)' }
+                            { offset: 0, color: 'rgba(212, 169, 81, 0.3)' },
+                            { offset: 1, color: 'rgba(212, 169, 81, 0.05)' }
                         ])
                     },
                     markPoint: {
@@ -820,8 +820,8 @@
                 font-size: 24px;
                 font-weight: 700;
                 
-                &.high { color: #52c41a; }
-                &.low { color: #ff4d4f; }
+                &.high { color: #ff4d4f; }
+                &.low { color: #52c41a; }
                 &.up { color: #52c41a; }
                 &.down { color: #ff4d4f; }
             }
@@ -829,7 +829,6 @@
     }
 
     .chart-section {
-        background: #fff9e2;
         border-radius: 8px;
         padding: 20px;
         margin-bottom: 24px;
@@ -919,8 +918,8 @@
                 color: var(--b3-theme-primary);
             }
             
-            .high { color: #52c41a; }
-            .low { color: #ff4d4f; }
+            .high { color: #ff4d4f; }
+            .low { color: #52c41a; }
         }
     }
 
