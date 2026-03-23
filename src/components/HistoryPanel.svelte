@@ -829,7 +829,7 @@
     }
 
     .chart-section {
-        background: var(--b3-theme-surface);
+        background: #fff9e2;
         border-radius: 8px;
         padding: 20px;
         margin-bottom: 24px;
