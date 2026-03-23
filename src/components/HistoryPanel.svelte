@@ -523,11 +523,11 @@
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">最高价</div>
-                        <div class="stat-value high">{formatPrice(priceStats?.max || 0)}</div>
+                        <div class="stat-value high">{formatPrice(latestRecord?.maxprice || 0)}</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">最低价</div>
-                        <div class="stat-value low">{formatPrice(priceStats?.min || 0)}</div>
+                        <div class="stat-value low">{formatPrice(latestRecord?.minprice || 0)}</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">区间涨跌</div>
