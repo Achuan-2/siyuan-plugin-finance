@@ -152,13 +152,15 @@
     }
 
     function updateGroupValues() {
-        groups = groups.map((group) => ({
-            ...group,
-            items: group.items.map((item) => ({
-                ...item,
-                value: settings[item.key] ?? item.value,
-            })),
-        }));
+        groups = groups.map((group) => {
+            const updatedItems = group.items.map((item) => {
+                if (settings[item.key] !== undefined) {
+                    return { ...item, value: settings[item.key] };
+                }
+                return item;
+            });
+            return { ...group, items: updatedItems };
+        });
     }
 
     async function saveSettings() {

@@ -59,6 +59,11 @@ export default class FinancePlugin extends Plugin {
     private historyDialog: Dialog | null = null;
 
     async onload() {
+        this.addIcons(`
+                <symbol id="iconFianceChart" viewBox="0 0 1024 1024">
+<path d="M843.377778 836.266667h-597.333334c-15.644444 0-28.444444-12.8-28.444444-28.444445V297.244444c0-15.644444 12.8-28.444444 28.444444-28.444444s28.444444 12.8 28.444445 28.444444v482.133334h568.888889c15.644444 0 28.444444 12.8 28.444444 28.444444s-12.8 28.444444-28.444444 28.444445z" fill="#3FA6AD" p-id="5827"></path><path d="M345.6 728.177778c-7.111111 0-14.222222-2.844444-19.911111-7.111111-11.377778-11.377778-12.8-28.444444-1.422222-39.822223L455.111111 540.444444c5.688889-7.111111 15.644444-9.955556 24.177778-8.533333l164.977778 19.911111 125.155555-199.111111c8.533333-12.8 25.6-17.066667 39.822222-8.533333 12.8 8.533333 17.066667 25.6 8.533334 39.822222l-133.688889 213.333333c-5.688889 9.955556-17.066667 14.222222-27.022222 12.8l-169.244445-21.333333-120.888889 129.422222c-5.688889 7.111111-12.8 9.955556-21.333333 9.955556z" fill="#DC4569" p-id="5828"></path>
+                </symbol>
+            `);
         // 插件被启用时会自动调用这个函数
         setPluginInstance(this);
 
@@ -102,7 +107,7 @@ export default class FinancePlugin extends Plugin {
      */
     private addTopBarButton() {
         this.topBarElement = this.addTopBar({
-            icon: "iconChart",
+            icon: "iconFianceChart",
             title: "理财数据监控",
             position: "right",
             callback: () => {
@@ -110,14 +115,7 @@ export default class FinancePlugin extends Plugin {
             }
         });
 
-        // 如果没有图标，使用自定义HTML
-        if (this.topBarElement) {
-            this.topBarElement.innerHTML = `
-                <span style="font-size: 16px;">📈</span>
-            `;
-            this.topBarElement.title = "理财数据监控";
-            this.topBarElement.style.cursor = "pointer";
-        }
+
     }
 
     /**
