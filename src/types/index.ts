@@ -67,6 +67,8 @@ export interface FinanceSettings {
     autoQuery: boolean;
     // 查询间隔（分钟）
     queryInterval: number;
+    // 每次查询后是否通知
+    notifyOnQuery: boolean;
     // 黄金API密钥
     goldAppkey: string;
     // 是否启用黄金API

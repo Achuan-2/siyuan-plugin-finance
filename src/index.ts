@@ -34,6 +34,7 @@ export const HISTORY_FILE = "history.json";
 const getDefaultSettings = (): FinanceSettings => ({
     autoQuery: true,
     queryInterval: 30,
+    notifyOnQuery: false,
     goldAppkey: '',
     goldEnabled: true,
     goldPriceAbove: '950',
@@ -269,6 +270,14 @@ export default class FinancePlugin extends Plugin {
 
             // 更新上次价格
             this.lastPrice = record.midprice;
+
+            // 查询后通知
+            if (this.settings?.notifyOnQuery) {
+                await sendNotification(
+                    '📊 黄金价格查询',
+                    `当前价格: ${record.midprice.toFixed(2)} 元/克`
+                );
+            }
 
             console.log(`[FinancePlugin] 黄金价格查询完成: ${record.midprice}`);
         } catch (e) {

@@ -10,6 +10,7 @@
     const getDefaultSettings = (): FinanceSettings => ({
         autoQuery: true,
         queryInterval: 30,
+        notifyOnQuery: false,
         goldAppkey: '',
         goldEnabled: true,
         goldPriceAbove: '950',
@@ -44,6 +45,13 @@
                         30: '每30分钟',
                         15: '每15分钟',
                     },
+                },
+                {
+                    key: 'notifyOnQuery',
+                    value: false,
+                    type: 'checkbox',
+                    title: '查询后通知',
+                    description: '每次查询价格后发送通知显示当前价格',
                 },
             ],
         },
