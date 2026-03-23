@@ -1,0 +1,52 @@
+{
+    "name": "Finance Monitor",
+    "settings": {
+        "settingsPanel": "Finance Monitor Settings",
+        "settingsGroup": {
+            "general": "General Settings",
+            "apis": "API Configuration",
+            "reset": "Reset Settings"
+        },
+        "autoQuery": {
+            "title": "Auto Query",
+            "description": "Automatically query price data every 30 minutes (on the hour and half-hour)"
+        },
+        "queryInterval": {
+            "title": "Query Interval",
+            "description": "Query interval time (minutes)"
+        },
+        "priceAbove": {
+            "title": "Price Rise Alert",
+            "description": "Send notification when price rises to the set value"
+        },
+        "priceBelow": {
+            "title": "Price Drop Alert",
+            "description": "Send notification when price drops to the set value"
+        },
+        "dailyDropPercent": {
+            "title": "Daily Drop Alert",
+            "description": "Send notification when price drops more than the set percentage from daily high"
+        },
+        "changePercent": {
+            "title": "Change Percent Alert",
+            "description": "Send notification when price changes more than the set percentage from last query"
+        },
+        "hint": {
+            "title": "💡Usage Tips",
+            "description": "The plugin adds a 📈 button to the top bar. Click to view historical data and price trends. Supports multiple API configurations and four types of alerts."
+        },
+        "reset": {
+            "title": "Reset Settings",
+            "description": "Reset all settings to default values",
+            "label": "Reset",
+            "confirmMessage": "Are you sure you want to reset all settings to default values? This action cannot be undone, and historical data will also be cleared.",
+            "message": "All settings have been reset to default values"
+        }
+    },
+    "notifications": {
+        "priceAbove": "📈 Price Rise Alert",
+        "priceBelow": "📉 Price Drop Alert",
+        "dailyDrop": "⬇️ Daily Drop Alert",
+        "changePercent": "⚡ Price Change Alert"
+    }
+}

@@ -1,0 +1,33 @@
+// 理财监控插件样式
+
+// 顶栏按钮样式
+.plugin-finance-topbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    
+    &:hover {
+        background-color: var(--b3-theme-background-light);
+    }
+}
+
+// 通知样式
+.finance-notification {
+    .b3-snackbar__content {
+        max-width: 400px;
+    }
+    
+    .notification-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    
+    .notification-body {
+        font-size: 13px;
+    }
+}

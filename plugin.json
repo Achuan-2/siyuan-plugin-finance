@@ -1,0 +1,42 @@
+{
+  "name": "siyuan-plugin-finance",
+  "author": "Achuan-2",
+  "url": "https://github.com/Achuan-2/siyuan-plugin-finance",
+  "version": "1.0.0",
+  "minAppVersion": "3.0.12",
+  "backends": [
+    "all"
+  ],
+  "frontends": [
+    "all"
+  ],
+  "disabledInPublish": true,
+  "displayName": {
+    "default": "Finance Monitor",
+    "zh_CN": "理财监控"
+  },
+  "description": {
+    "default": "A finance monitoring plugin supporting multiple APIs and price alerts",
+    "zh_CN": "支持多接口配置和价格预警的理财监控插件"
+  },
+  "readme": {
+    "default": "README_en_US.md",
+    "zh_CN": "README.md"
+  },
+  "funding": {
+    "custom": [
+      "https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/20241128221208-2024-11-28.png"
+    ]
+  },
+  "keywords": [
+    "finance",
+    "gold",
+    "price",
+    "alert",
+    "monitor",
+    "理财",
+    "黄金",
+    "价格监控",
+    "预警"
+  ]
+}

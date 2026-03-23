@@ -1,0 +1,52 @@
+{
+    "name": "理财监控",
+    "settings": {
+        "settingsPanel": "理财监控设置",
+        "settingsGroup": {
+            "general": "常规设置",
+            "apis": "接口配置",
+            "reset": "重置设置"
+        },
+        "autoQuery": {
+            "title": "自动查询",
+            "description": "每30分钟自动查询一次价格数据（整点和半点）"
+        },
+        "queryInterval": {
+            "title": "查询间隔",
+            "description": "查询间隔时间（分钟）"
+        },
+        "priceAbove": {
+            "title": "价格上涨预警",
+            "description": "当价格上涨到设定值时发送通知"
+        },
+        "priceBelow": {
+            "title": "价格下跌预警",
+            "description": "当价格下跌到设定值时发送通知"
+        },
+        "dailyDropPercent": {
+            "title": "日跌幅预警",
+            "description": "当天从最高价下跌超过设定百分比时发送通知"
+        },
+        "changePercent": {
+            "title": "变化幅度预警",
+            "description": "价格相比上次查询变化超过设定百分比时发送通知"
+        },
+        "hint": {
+            "title": "💡使用说明",
+            "description": "插件会在顶栏添加一个📈按钮，点击可查看历史数据和价格走势。支持多接口配置和四种预警类型。"
+        },
+        "reset": {
+            "title": "重置设置",
+            "description": "重置所有设置为默认值",
+            "label": "重置",
+            "confirmMessage": "确定要将所有设置重置为默认值吗？此操作无法撤销，历史数据也会被清空。",
+            "message": "已重置所有设置为默认值"
+        }
+    },
+    "notifications": {
+        "priceAbove": "📈 价格上涨预警",
+        "priceBelow": "📉 价格下跌预警",
+        "dailyDrop": "⬇️ 日跌幅预警",
+        "changePercent": "⚡ 价格变化预警"
+    }
+}
