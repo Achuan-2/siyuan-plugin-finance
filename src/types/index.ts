@@ -43,7 +43,7 @@ export interface AlertRule {
     lastAlertDate?: string;
 }
 
-// 接口配置
+// 接口配置（内部使用）
 export interface ApiConfig {
     id: string;
     name: string;
@@ -61,14 +61,24 @@ export interface ApiConfig {
     lastPrices: Record<string, number>;
 }
 
-// 插件设置
+// 插件设置（用于设置面板）
 export interface FinanceSettings {
     // 是否启用定时查询
     autoQuery: boolean;
     // 查询间隔（分钟）
     queryInterval: number;
-    // 接口列表
-    apiConfigs: ApiConfig[];
+    // 黄金API密钥
+    goldAppkey: string;
+    // 是否启用黄金API
+    goldEnabled: boolean;
+    // 黄金价格上涨预警（支持逗号分隔多个价格，兼容旧数据为数字类型）
+    goldPriceAbove: string | number;
+    // 黄金价格下跌预警（支持逗号分隔多个价格，兼容旧数据为数字类型）
+    goldPriceBelow: string | number;
+    // 黄金日涨跌幅预警(%)
+    goldDailyChangePercent: number;
+    // 黄金价格变化预警(%)
+    goldChangePercent: number;
 }
 
 // 预警通知信息

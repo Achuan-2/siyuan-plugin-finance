@@ -2,32 +2,30 @@
     import { onMount, onDestroy } from 'svelte';
     import { Dialog, showMessage } from 'siyuan';
     import * as echarts from 'echarts';
-    import type { ApiConfig, PriceRecord, AlertRule } from '../types';
+    import type { PriceRecord, FinanceSettings } from '../types';
 
     export let plugin: any;
     export let onClose: () => void;
 
-    let apiConfigs: ApiConfig[] = [];
-    let selectedApiId: string = '';
-    let selectedProduct: string = '';
+    let settings: FinanceSettings | null = null;
     let loading = false;
     let autoRefresh: number | null = null;
+    let historyData: PriceRecord[] = [];
 
     // 图表配置
     let chartTimeRange: '1d' | '7d' | '30d' | 'all' = '1d';
     let chartContainer: HTMLDivElement;
     let chartInstance: echarts.ECharts | null = null;
 
-    $: selectedApi = apiConfigs.find(a => a.id === selectedApiId);
-    $: products = selectedApi ? selectedApi.productTypes : [];
-    $: historyData = selectedApi && selectedProduct 
-        ? (selectedApi.historyData[selectedProduct] || []) 
-        : [];
+    // 刷新历史数据
+    function refreshHistoryData() {
+        const data = plugin?.getHistoryData?.();
+        historyData = Array.isArray(data) ? data : [];
+    }
     $: filteredData = filterDataByTimeRange(historyData, chartTimeRange);
     $: priceStats = calculateStats(filteredData);
-    $: alertRule = selectedApi && selectedProduct 
-        ? (selectedApi.alertRules[selectedProduct] || {})
-        : {};
+    $: latestRecord = historyData.length > 0 ? historyData[historyData.length - 1] : null;
+    $: historyDataCount = historyData.length;
 
     // 当过滤数据变化时更新图表
     $: if (chartInstance && filteredData) {
@@ -64,12 +62,147 @@
     }
 
     function formatPrice(price: number): string {
-        return price.toFixed(2);
+        return price?.toFixed(2) || '--';
     }
 
     function formatDate(timestamp: number): string {
         const date = new Date(timestamp);
         return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+    }
+
+    // 格式化多价格显示（逗号分隔，超出容器自动缩略）
+    function formatMultiPrice(priceStr: string | number): string {
+        if (!priceStr) return '';
+        // 兼容旧数据格式（数字类型）
+        if (typeof priceStr === 'number') {
+            return priceStr.toString();
+        }
+        const prices = priceStr.split(/[,，]/).map(p => p.trim()).filter(p => p);
+        if (prices.length === 0) return '';
+        if (prices.length === 1) return prices[0];
+        // 多个价格用逗号分隔显示，超出容器会自动缩略
+        return prices.join(', ');
+    }
+
+    // 打开预警设置编辑对话框
+    function openAlertEditDialog() {
+        if (!settings) return;
+
+        const dialog = new Dialog({
+            title: '设置预警',
+            content: `
+                <div class="b3-dialog__content" style="padding: 20px;">
+                    <div style="margin-bottom: 16px; font-size: 12px; color: var(--b3-theme-on-surface);">
+                        支持用英文逗号(,)或中文逗号(，)分隔多个价格
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">价格上涨至</label>
+                        <input class="b3-text-field fn__block" type="text" id="priceAboveInput" 
+                            placeholder="如：950, 960, 970"
+                            value="${settings.goldPriceAbove || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            价格 ≥ 设定值时提醒（支持多个价格，用逗号分隔）
+                        </div>
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">价格下跌至</label>
+                        <input class="b3-text-field fn__block" type="text" id="priceBelowInput" 
+                            placeholder="如：900, 880, 850"
+                            value="${settings.goldPriceBelow || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            价格 ≤ 设定值时提醒（支持多个价格，用逗号分隔）
+                        </div>
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">日涨跌幅超 (%)</label>
+                        <input class="b3-text-field fn__block" type="number" id="dailyChangeInput" 
+                            placeholder="如：3" step="0.1"
+                            value="${settings.goldDailyChangePercent || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            当天上涨或下跌超过设定百分比时提醒（每日只通知一次）
+                        </div>
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">价格变化超 (%)</label>
+                        <input class="b3-text-field fn__block" type="number" id="changePercentInput" 
+                            placeholder="如：2" step="0.1"
+                            value="${settings.goldChangePercent || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            相比上次查询变化超过设定百分比时提醒
+                        </div>
+                    </div>
+                </div>
+                <div class="b3-dialog__action">
+                    <button class="b3-button b3-button--cancel" id="cancelAlertBtn">取消</button>
+                    <button class="b3-button b3-button--primary" id="saveAlertBtn">保存</button>
+                </div>
+            `,
+            width: '450px'
+        });
+
+        const priceAboveInput = dialog.element.querySelector('#priceAboveInput') as HTMLInputElement;
+        const priceBelowInput = dialog.element.querySelector('#priceBelowInput') as HTMLInputElement;
+        const dailyChangeInput = dialog.element.querySelector('#dailyChangeInput') as HTMLInputElement;
+        const changePercentInput = dialog.element.querySelector('#changePercentInput') as HTMLInputElement;
+        const saveBtn = dialog.element.querySelector('#saveAlertBtn') as HTMLButtonElement;
+        const cancelBtn = dialog.element.querySelector('#cancelAlertBtn') as HTMLButtonElement;
+
+        // 保存按钮
+        saveBtn.addEventListener('click', async () => {
+            const priceAbove = priceAboveInput.value.trim();
+            const priceBelow = priceBelowInput.value.trim();
+            const dailyChange = parseFloat(dailyChangeInput.value);
+            const changePercent = parseFloat(changePercentInput.value);
+
+            // 验证价格格式
+            if (priceAbove && !validateMultiPrice(priceAbove)) {
+                showMessage('价格上涨值格式错误', 3000, 'error');
+                return;
+            }
+            if (priceBelow && !validateMultiPrice(priceBelow)) {
+                showMessage('价格下跌值格式错误', 3000, 'error');
+                return;
+            }
+
+            // 更新设置
+            settings.goldPriceAbove = priceAbove || '';
+            settings.goldPriceBelow = priceBelow || '';
+            settings.goldDailyChangePercent = isNaN(dailyChange) || dailyChange <= 0 ? 0 : dailyChange;
+            settings.goldChangePercent = isNaN(changePercent) || changePercent <= 0 ? 0 : changePercent;
+
+            // 保存到插件
+            try {
+                await plugin.saveSettings(settings);
+                showMessage('预警设置已保存', 2000);
+                await loadData(); // 刷新显示
+            } catch (e) {
+                showMessage('保存失败: ' + e, 3000, 'error');
+            }
+
+            dialog.destroy();
+        });
+
+        // 取消按钮
+        cancelBtn.addEventListener('click', () => {
+            dialog.destroy();
+        });
+    }
+
+    // 验证多价格格式
+    function validateMultiPrice(priceStr: string): boolean {
+        if (!priceStr) return true;
+        const prices = priceStr.split(/[,，]/).map(p => p.trim()).filter(p => p);
+        for (const price of prices) {
+            const num = parseFloat(price);
+            if (isNaN(num) || num <= 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // 初始化 ECharts
@@ -260,18 +393,12 @@
     async function loadData() {
         loading = true;
         try {
-            const settings = await plugin.loadSettings();
-            apiConfigs = settings.apiConfigs || [];
-            
-            if (apiConfigs.length && !selectedApiId) {
-                selectedApiId = apiConfigs[0].id;
-                if (apiConfigs[0].productTypes.length) {
-                    selectedProduct = apiConfigs[0].productTypes[0];
-                }
-            }
+            settings = await plugin.loadSettings();
         } catch (e) {
-            showMessage('加载数据失败: ' + e);
+            showMessage('加载设置失败: ' + e);
         } finally {
+            // 无论设置加载成功与否，都刷新历史数据
+            refreshHistoryData();
             loading = false;
         }
     }
@@ -279,28 +406,33 @@
     function startAutoRefresh() {
         if (autoRefresh) clearInterval(autoRefresh);
         autoRefresh = window.setInterval(() => {
+            // 刷新设置和历史数据
             loadData();
+            // 额外刷新历史数据以确保数据最新
+            refreshHistoryData();
         }, 30000); // 每30秒刷新一次
     }
 
     onMount(() => {
+        // 先刷新历史数据（同步操作，确保初始数据加载）
+        refreshHistoryData();
         loadData();
         startAutoRefresh();
         // 延迟初始化图表，确保DOM已准备好
         setTimeout(initChart, 100);
     });
 
-    // 手动查询当前选中的API
+    // 手动查询
     async function manualQuery() {
-        if (!selectedApi) {
-            showMessage('请先选择一个接口', 3000, 'error');
-            return;
-        }
-        
         loading = true;
         try {
             await plugin.manualQuery();
-            await loadData(); // 重新加载数据
+            // 查询完成后刷新历史数据
+            refreshHistoryData();
+            // 强制刷新图表
+            if (chartInstance) {
+                updateChart();
+            }
             showMessage('查询完成', 2000);
         } catch (e) {
             showMessage('查询失败: ' + e, 3000, 'error');
@@ -313,125 +445,6 @@
         if (autoRefresh) clearInterval(autoRefresh);
         destroyChart();
     });
-
-    // 打开预警设置编辑对话框
-    function openAlertEditDialog() {
-        if (!selectedApi || !selectedProduct) return;
-        
-        // 获取当前规则，如果不存在则创建空规则
-        const currentRule: AlertRule = { ...alertRule };
-        
-        const dialog = new Dialog({
-            title: `设置预警 - ${selectedProduct}`,
-            content: `
-                <div class="b3-dialog__content" style="padding: 20px;">
-                    <div style="margin-bottom: 16px; font-size: 12px; color: var(--b3-theme-on-surface);">
-                        留空表示不启用该预警
-                    </div>
-                    
-                    <div class="b3-form__item" style="margin-bottom: 16px;">
-                        <label class="b3-form__label">价格上涨至</label>
-                        <input class="b3-text-field fn__block" type="number" id="priceAboveInput" 
-                            placeholder="如：950" step="0.01" 
-                            value="${currentRule.priceAbove || ''}">
-                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
-                            价格 ≥ 设定值时提醒（首次触发）
-                        </div>
-                    </div>
-                    
-                    <div class="b3-form__item" style="margin-bottom: 16px;">
-                        <label class="b3-form__label">价格下跌至</label>
-                        <input class="b3-text-field fn__block" type="number" id="priceBelowInput" 
-                            placeholder="如：900" step="0.01"
-                            value="${currentRule.priceBelow || ''}">
-                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
-                            价格 ≤ 设定值时提醒（首次触发）
-                        </div>
-                    </div>
-                    
-                    <div class="b3-form__item" style="margin-bottom: 16px;">
-                        <label class="b3-form__label">日涨跌幅超 (%)</label>
-                        <input class="b3-text-field fn__block" type="number" id="dailyDropInput" 
-                            placeholder="如：3" step="0.1"
-                            value="${currentRule.dailyChangePercent || ''}">
-                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
-                            当天上涨或下跌超过设定百分比时提醒（每日只通知一次）
-                        </div>
-                    </div>
-                    
-                    <div class="b3-form__item" style="margin-bottom: 16px;">
-                        <label class="b3-form__label">价格变化超 (%)</label>
-                        <input class="b3-text-field fn__block" type="number" id="changePercentInput" 
-                            placeholder="如：2" step="0.1"
-                            value="${currentRule.changePercent || ''}">
-                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
-                            相比上次查询变化超过设定百分比时提醒
-                        </div>
-                    </div>
-                </div>
-                <div class="b3-dialog__action">
-                    <button class="b3-button b3-button--cancel" id="cancelAlertBtn">取消</button>
-                    <button class="b3-button b3-button--primary" id="saveAlertBtn">保存</button>
-                </div>
-            `,
-            width: '450px'
-        });
-
-        const priceAboveInput = dialog.element.querySelector('#priceAboveInput') as HTMLInputElement;
-        const priceBelowInput = dialog.element.querySelector('#priceBelowInput') as HTMLInputElement;
-        const dailyDropInput = dialog.element.querySelector('#dailyDropInput') as HTMLInputElement;
-        const changePercentInput = dialog.element.querySelector('#changePercentInput') as HTMLInputElement;
-        const saveBtn = dialog.element.querySelector('#saveAlertBtn') as HTMLButtonElement;
-        const cancelBtn = dialog.element.querySelector('#cancelAlertBtn') as HTMLButtonElement;
-
-        // 保存按钮
-        saveBtn.addEventListener('click', async () => {
-            const newRule: AlertRule = {};
-            
-            const priceAbove = parseFloat(priceAboveInput.value);
-            if (!isNaN(priceAbove) && priceAbove > 0) {
-                newRule.priceAbove = priceAbove;
-            }
-            
-            const priceBelow = parseFloat(priceBelowInput.value);
-            if (!isNaN(priceBelow) && priceBelow > 0) {
-                newRule.priceBelow = priceBelow;
-            }
-            
-            const dailyChange = parseFloat(dailyDropInput.value);
-            if (!isNaN(dailyChange) && dailyChange > 0) {
-                newRule.dailyChangePercent = dailyChange;
-            }
-            
-            const changePercent = parseFloat(changePercentInput.value);
-            if (!isNaN(changePercent) && changePercent > 0) {
-                newRule.changePercent = changePercent;
-            }
-
-            // 更新规则
-            selectedApi!.alertRules[selectedProduct!] = newRule;
-            
-            // 保存设置
-            try {
-                const settings = await plugin.loadSettings();
-                const apiIndex = settings.apiConfigs.findIndex((a: ApiConfig) => a.id === selectedApi!.id);
-                if (apiIndex !== -1) {
-                    settings.apiConfigs[apiIndex] = selectedApi!;
-                    await plugin.saveSettings(settings);
-                    showMessage('预警设置已保存', 2000);
-                }
-            } catch (e) {
-                showMessage('保存失败: ' + e, 3000, 'error');
-            }
-            
-            dialog.destroy();
-        });
-
-        // 取消按钮
-        cancelBtn.addEventListener('click', () => {
-            dialog.destroy();
-        });
-    }
 </script>
 
 <div class="finance-history-panel">
@@ -451,80 +464,86 @@
     <div class="panel-content">
         <div class="sidebar">
             <div class="section">
-                <h3>选择接口</h3>
-                <select class="b3-select" bind:value={selectedApiId}>
-                    {#each apiConfigs as api}
-                        <option value={api.id}>{api.name} {api.enabled ? '✓' : '✗'}</option>
-                    {/each}
-                </select>
-            </div>
-
-            {#if products.length}
-            <div class="section">
-                <h3>选择产品</h3>
-                <div class="product-list">
-                    {#each products as product}
-                        <button 
-                            class="product-btn" 
-                            class:active={selectedProduct === product}
-                            on:click={() => selectedProduct = product}
-                        >
-                            {product}
-                        </button>
-                    {/each}
+                <h3>数据概览</h3>
+                <div class="api-status">
+                    <div class="status-row">
+                        <span class="status-label">API状态:</span>
+                        <span class="status-value" class:enabled={settings?.goldEnabled}>
+                            {settings?.goldEnabled ? '✓ 已启用' : '✗ 已禁用'}
+                        </span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">自动查询:</span>
+                        <span class="status-value" class:enabled={settings?.autoQuery}>
+                            {settings?.autoQuery ? '✓ 已开启' : '✗ 已关闭'}
+                        </span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">数据条数:</span>
+                        <span class="status-value">{historyData.length}</span>
+                    </div>
                 </div>
             </div>
-            {/if}
 
-            {#if selectedApi && selectedProduct}
             <div class="section alert-section">
-                <div class="alert-header">
+                <div class="alert-header-row">
                     <h3>⚠️ 预警设置</h3>
-                    <button class="edit-alert-btn" on:click={openAlertEditDialog}>编辑</button>
+                    {#if settings}
+                        <button class="edit-alert-btn" on:click={openAlertEditDialog}>编辑</button>
+                    {/if}
                 </div>
-                {#if alertRule && Object.keys(alertRule).length}
-                    {#if alertRule.priceAbove}
+                {#if settings}
+                    {#if settings.goldPriceAbove}
                         <div class="alert-item">
                             <span class="alert-label">价格上涨至:</span>
-                            <span class="alert-value above">{alertRule.priceAbove}</span>
+                            <span class="alert-value above" title={settings.goldPriceAbove}>{formatMultiPrice(settings.goldPriceAbove)}</span>
                         </div>
                     {/if}
-                    {#if alertRule.priceBelow}
+                    {#if settings.goldPriceBelow}
                         <div class="alert-item">
                             <span class="alert-label">价格下跌至:</span>
-                            <span class="alert-value below">{alertRule.priceBelow}</span>
+                            <span class="alert-value below" title={settings.goldPriceBelow}>{formatMultiPrice(settings.goldPriceBelow)}</span>
                         </div>
                     {/if}
-                    {#if alertRule.dailyChangePercent}
+                    {#if settings.goldDailyChangePercent}
                         <div class="alert-item">
                             <span class="alert-label">日涨跌幅超:</span>
-                            <span class="alert-value drop">{alertRule.dailyChangePercent}%</span>
-                            {#if alertRule.lastAlertDate}
-                                <span style="font-size: 11px; color: var(--b3-theme-on-surface); margin-left: 8px;">
-                                    (今日已通知)
-                                </span>
-                            {/if}
+                            <span class="alert-value drop">{settings.goldDailyChangePercent}%</span>
                         </div>
                     {/if}
-                    {#if alertRule.changePercent}
+                    {#if settings.goldChangePercent}
                         <div class="alert-item">
-                            <span class="alert-label">变化幅度超:</span>
-                            <span class="alert-value change">{alertRule.changePercent}%</span>
+                            <span class="alert-label">价格变化超:</span>
+                            <span class="alert-value change">{settings.goldChangePercent}%</span>
                         </div>
+                    {/if}
+                    {#if !settings.goldPriceAbove && !settings.goldPriceBelow && !settings.goldDailyChangePercent && !settings.goldChangePercent}
+                        <div class="alert-empty">暂无预警设置<br>点击"编辑"按钮添加</div>
                     {/if}
                 {:else}
-                    <div class="alert-empty">暂无预警设置<br>点击"编辑"添加</div>
+                    <div class="alert-empty">加载中...</div>
                 {/if}
             </div>
-            {/if}
+
+            <div class="section">
+                <h3>当前价格</h3>
+                {#if latestRecord}
+                    <div class="current-price">
+                        <div class="price-main">{formatPrice(latestRecord.midprice)}</div>
+                        <div class="price-time">{latestRecord.date} {latestRecord.time}</div>
+                    </div>
+                {:else}
+                    <div class="no-data-tip">暂无数据</div>
+                {/if}
+            </div>
         </div>
 
         <div class="main-content">
-            {#if selectedProduct && historyData.length}
+            {#if historyData.length}
                 <div class="stats-cards">
                     <div class="stat-card">
-                        <div class="stat-label">当前价格</div>
-                        <div class="stat-value">{formatPrice(priceStats?.last || 0)}</div>
+                        <div class="stat-label">最新价格</div>
+                        <div class="stat-value">{formatPrice(latestRecord?.midprice || 0)}</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">最高价</div>
@@ -535,7 +554,7 @@
                         <div class="stat-value low">{formatPrice(priceStats?.min || 0)}</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-label">涨跌幅</div>
+                        <div class="stat-label">区间涨跌</div>
                         <div class="stat-value" class:up={priceStats && priceStats.change > 0} class:down={priceStats && priceStats.change < 0}>
                             {priceStats ? (priceStats.change > 0 ? '+' : '') + priceStats.change.toFixed(2) : 0}%
                         </div>
@@ -544,7 +563,7 @@
 
                 <div class="chart-section">
                     <div class="chart-header">
-                        <h3>{selectedProduct} - 价格走势</h3>
+                        <h3>人民币账户黄金 - 价格走势</h3>
                         <div class="time-range">
                             {#each [['1d', '1天'], ['7d', '7天'], ['30d', '30天'], ['all', '全部']] as [range, label]}
                                 <button 
@@ -596,15 +615,15 @@
                         </table>
                     </div>
                 </div>
-            {:else if !selectedProduct}
-                <div class="empty-state">
-                    <div class="empty-icon">📊</div>
-                    <p>请选择接口和产品查看数据</p>
-                </div>
             {:else}
                 <div class="empty-state">
                     <div class="empty-icon">📈</div>
-                    <p>暂无数据，请等待下次查询</p>
+                    <p>暂无数据，请等待下次自动查询或点击"立即查询"</p>
+                    {#if !settings?.goldEnabled}
+                        <p class="empty-hint">提示：请在设置中启用黄金API并配置appkey</p>
+                    {:else if !settings?.goldAppkey}
+                        <p class="empty-hint">提示：请在设置中配置API密钥(appkey)</p>
+                    {/if}
                 </div>
             {/if}
         </div>
@@ -650,6 +669,7 @@
         padding: 16px;
         border-right: 1px solid var(--b3-border-color);
         overflow-y: auto;
+        flex-shrink: 0;
         
         .section {
             margin-bottom: 20px;
@@ -662,30 +682,37 @@
             }
         }
         
-        .product-list {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-        
-        .product-btn {
-            padding: 8px 12px;
-            text-align: left;
-            border: 1px solid var(--b3-border-color);
-            border-radius: 6px;
-            background: var(--b3-theme-background);
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 13px;
+        .api-status {
+            background: var(--b3-theme-surface);
+            padding: 12px;
+            border-radius: 8px;
             
-            &:hover {
-                border-color: var(--b3-theme-primary);
-            }
-            
-            &.active {
-                background: var(--b3-theme-primary);
-                color: white;
-                border-color: var(--b3-theme-primary);
+            .status-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 6px 0;
+                border-bottom: 1px dashed var(--b3-border-color);
+                font-size: 13px;
+                
+                &:last-child {
+                    border-bottom: none;
+                }
+                
+                .status-label {
+                    color: var(--b3-theme-on-surface);
+                }
+                
+                .status-value {
+                    font-weight: 500;
+                    
+                    &.enabled {
+                        color: #52c41a;
+                    }
+                    
+                    &:not(.enabled) {
+                        color: #ff4d4f;
+                    }
+                }
             }
         }
         
@@ -694,7 +721,7 @@
             padding: 12px;
             border-radius: 8px;
             
-            .alert-header {
+            .alert-header-row {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
@@ -733,10 +760,17 @@
                 
                 .alert-label {
                     color: var(--b3-theme-on-surface);
+                    flex-shrink: 0;
                 }
                 
                 .alert-value {
                     font-weight: 600;
+                    margin-left: 8px;
+                    text-align: right;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    max-width: 100px;
                     
                     &.above { color: #52c41a; }
                     &.below { color: #ff4d4f; }
@@ -753,12 +787,39 @@
                 line-height: 1.6;
             }
         }
+        
+        .current-price {
+            background: var(--b3-theme-surface);
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+            
+            .price-main {
+                font-size: 28px;
+                font-weight: 700;
+                color: var(--b3-theme-primary);
+                margin-bottom: 4px;
+            }
+            
+            .price-time {
+                font-size: 12px;
+                color: var(--b3-theme-on-surface);
+            }
+        }
+        
+        .no-data-tip {
+            font-size: 13px;
+            color: var(--b3-theme-on-surface);
+            text-align: center;
+            padding: 16px;
+        }
     }
 
     .main-content {
         flex: 1;
         padding: 20px;
         overflow-y: auto;
+        min-width: 0;
     }
 
     .stats-cards {
@@ -902,6 +963,13 @@
         
         p {
             font-size: 16px;
+            margin: 0 0 8px 0;
+        }
+        
+        .empty-hint {
+            font-size: 13px;
+            color: var(--b3-theme-on-surface);
+            opacity: 0.8;
         }
     }
 </style>
