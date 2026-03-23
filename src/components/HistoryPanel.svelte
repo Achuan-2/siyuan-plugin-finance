@@ -233,18 +233,11 @@
     function updateChart() {
         if (!chartInstance || !filteredData.length) return;
 
-        const isUp = priceStats ? priceStats.change >= 0 : true;
-        const color = isUp ? '#52c41a' : '#ff4d4f';
+        const color = '#FFD700'; // 黄色曲线
         
         const dates = filteredData.map(d => formatDate(d.timestamp));
         const prices = filteredData.map(d => d.midprice);
         
-        // 计算移动平均线（5点平均）
-        const ma5 = prices.map((_, i) => {
-            if (i < 4) return null;
-            const sum = prices.slice(i - 4, i + 1).reduce((a, b) => a + b, 0);
-            return sum / 5;
-        });
 
         const option: echarts.EChartsOption = {
             backgroundColor: 'transparent',
@@ -333,31 +326,16 @@
                     },
                     areaStyle: {
                         color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                            { offset: 0, color: isUp ? 'rgba(82, 196, 26, 0.3)' : 'rgba(255, 77, 79, 0.3)' },
-                            { offset: 1, color: isUp ? 'rgba(82, 196, 26, 0.05)' : 'rgba(255, 77, 79, 0.05)' }
+                            { offset: 0, color: 'rgba(255, 215, 0, 0.3)' },
+                            { offset: 1, color: 'rgba(255, 215, 0, 0.05)' }
                         ])
-                    },
-                    markLine: {
-                        silent: true,
-                        lineStyle: {
-                            color: 'var(--b3-theme-on-surface)',
-                            type: 'dashed'
-                        },
-                        data: [
-                            {
-                                type: 'average',
-                                name: '平均值',
-                                label: {
-                                    formatter: '平均: {c}'
-                                }
-                            }
-                        ]
                     },
                     markPoint: {
                         data: [
                             {
                                 type: 'max',
                                 name: '最高',
+                                itemStyle: { color: '#ff4d4f' }, // 红色
                                 label: {
                                     formatter: '{c}'
                                 }
@@ -365,6 +343,7 @@
                             {
                                 type: 'min',
                                 name: '最低',
+                                itemStyle: { color: '#52c41a' }, // 绿色
                                 label: {
                                     formatter: '{c}'
                                 }
@@ -372,18 +351,7 @@
                         ]
                     }
                 },
-                {
-                    name: 'MA5',
-                    type: 'line',
-                    data: ma5,
-                    smooth: true,
-                    symbol: 'none',
-                    lineStyle: {
-                        color: '#1890ff',
-                        width: 1.5,
-                        type: 'dashed'
-                    }
-                }
+
             ]
         };
 
