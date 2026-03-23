@@ -1,34 +1,53 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { Dialog, showMessage } from 'siyuan';
+    import { Dialog, showMessage, confirm } from 'siyuan';
     import * as echarts from 'echarts';
-    import type { PriceRecord, FinanceSettings } from '../types';
+    import type { PriceRecord, FinanceSettings, MetalConfig, MetalDataItem } from '../types';
+    import { METAL_TYPES, DEFAULT_SETTINGS } from '../types';
 
     export let plugin: any;
     export let onClose: () => void;
 
-    let settings: FinanceSettings | null = null;
+    let settings: FinanceSettings = DEFAULT_SETTINGS;
     let loading = false;
     let autoRefresh: number | null = null;
+    let currentPrices: Map<string, MetalDataItem> = new Map();
+    let selectedMetal: string = '人民币账户黄金';
     let historyData: PriceRecord[] = [];
+    let isVisible = true; // 页面是否可见
+    let visibilityCheckInterval: number | null = null;
 
     // 图表配置
     let chartTimeRange: '1d' | '7d' | '30d' | 'all' = '1d';
     let chartContainer: HTMLDivElement;
     let chartInstance: echarts.ECharts | null = null;
 
-    // 刷新历史数据
-    function refreshHistoryData() {
-        const data = plugin?.getHistoryData?.();
-        historyData = Array.isArray(data) ? data : [];
-    }
+    // 设置面板显示状态
+    let showSettings = false;
+
+    // 刷新频率选项
+    const intervalOptions = [
+        { value: 10, label: '10秒' },
+        { value: 30, label: '30秒' },
+        { value: 60, label: '1分钟' },
+        { value: 300, label: '5分钟' },
+        { value: 600, label: '10分钟' },
+        { value: 900, label: '15分钟' },
+        { value: 1800, label: '30分钟' },
+    ];
+
+    // 顶栏显示选项
+    const topBarOptions = [
+        { value: 'none', label: '不显示' },
+        ...METAL_TYPES.map(name => ({ value: name, label: name })),
+    ];
+
     $: filteredData = filterDataByTimeRange(historyData, chartTimeRange);
     $: priceStats = calculateStats(filteredData);
     $: latestRecord = historyData.length > 0 ? historyData[historyData.length - 1] : null;
-    $: historyDataCount = historyData.length;
 
-    // 当过滤数据变化时更新图表
-    $: if (chartInstance && filteredData) {
+    // 当过滤数据或选中品种变化时更新图表
+    $: if (chartInstance && filteredData && selectedMetal) {
         updateChart();
     }
 
@@ -50,13 +69,13 @@
     function calculateStats(data: PriceRecord[]) {
         if (!data.length) return null;
         
-        const prices = data.map(d => d.midprice);
+        const prices = data.map(d => d.price);
         const max = Math.max(...prices);
         const min = Math.min(...prices);
         const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
         const first = prices[0];
         const last = prices[prices.length - 1];
-        const change = ((last - first) / first) * 100;
+        const change = first > 0 ? ((last - first) / first) * 100 : 0;
         
         return { max, min, avg, first, last, change };
     }
@@ -70,157 +89,50 @@
         return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
     }
 
-    // 格式化多价格显示（逗号分隔，超出容器自动缩略）
     function formatMultiPrice(priceStr: string | number): string {
         if (!priceStr) return '';
-        // 兼容旧数据格式（数字类型）
         if (typeof priceStr === 'number') {
             return priceStr.toString();
         }
         const prices = priceStr.split(/[,，]/).map(p => p.trim()).filter(p => p);
         if (prices.length === 0) return '';
         if (prices.length === 1) return prices[0];
-        // 多个价格用逗号分隔显示，超出容器会自动缩略
         return prices.join(', ');
-    }
-
-    // 打开预警设置编辑对话框
-    function openAlertEditDialog() {
-        if (!settings) return;
-
-        const dialog = new Dialog({
-            title: '设置预警',
-            content: `
-                <div class="b3-dialog__content" style="padding: 20px;">
-                    <div style="margin-bottom: 16px; font-size: 12px; color: var(--b3-theme-on-surface);">
-                        支持用英文逗号(,)或中文逗号(，)分隔多个价格
-                    </div>
-                    
-                    <div class="b3-form__item" style="margin-bottom: 16px;">
-                        <label class="b3-form__label">价格上涨至</label>
-                        <input class="b3-text-field fn__block" type="text" id="priceAboveInput" 
-                            placeholder="如：950, 960, 970"
-                            value="${settings.goldPriceAbove || ''}">
-                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
-                            价格 ≥ 设定值时提醒（支持多个价格，用逗号分隔）
-                        </div>
-                    </div>
-                    
-                    <div class="b3-form__item" style="margin-bottom: 16px;">
-                        <label class="b3-form__label">价格下跌至</label>
-                        <input class="b3-text-field fn__block" type="text" id="priceBelowInput" 
-                            placeholder="如：900, 880, 850"
-                            value="${settings.goldPriceBelow || ''}">
-                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
-                            价格 ≤ 设定值时提醒（支持多个价格，用逗号分隔）
-                        </div>
-                    </div>
-                    
-                    <div class="b3-form__item" style="margin-bottom: 16px;">
-                        <label class="b3-form__label">日涨跌幅超 (%)</label>
-                        <input class="b3-text-field fn__block" type="number" id="dailyChangeInput" 
-                            placeholder="如：3" step="0.1"
-                            value="${settings.goldDailyChangePercent || ''}">
-                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
-                            当天上涨或下跌超过设定百分比时提醒（每日只通知一次）
-                        </div>
-                    </div>
-                    
-                    <div class="b3-form__item" style="margin-bottom: 16px;">
-                        <label class="b3-form__label">价格变化超 (%)</label>
-                        <input class="b3-text-field fn__block" type="number" id="changePercentInput" 
-                            placeholder="如：2" step="0.1"
-                            value="${settings.goldChangePercent || ''}">
-                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
-                            相比上次查询变化超过设定百分比时提醒
-                        </div>
-                    </div>
-                </div>
-                <div class="b3-dialog__action">
-                    <button class="b3-button b3-button--cancel" id="cancelAlertBtn">取消</button>
-                    <button class="b3-button b3-button--primary" id="saveAlertBtn">保存</button>
-                </div>
-            `,
-            width: '450px'
-        });
-
-        const priceAboveInput = dialog.element.querySelector('#priceAboveInput') as HTMLInputElement;
-        const priceBelowInput = dialog.element.querySelector('#priceBelowInput') as HTMLInputElement;
-        const dailyChangeInput = dialog.element.querySelector('#dailyChangeInput') as HTMLInputElement;
-        const changePercentInput = dialog.element.querySelector('#changePercentInput') as HTMLInputElement;
-        const saveBtn = dialog.element.querySelector('#saveAlertBtn') as HTMLButtonElement;
-        const cancelBtn = dialog.element.querySelector('#cancelAlertBtn') as HTMLButtonElement;
-
-        // 保存按钮
-        saveBtn.addEventListener('click', async () => {
-            const priceAbove = priceAboveInput.value.trim();
-            const priceBelow = priceBelowInput.value.trim();
-            const dailyChange = parseFloat(dailyChangeInput.value);
-            const changePercent = parseFloat(changePercentInput.value);
-
-            // 验证价格格式
-            if (priceAbove && !validateMultiPrice(priceAbove)) {
-                showMessage('价格上涨值格式错误', 3000, 'error');
-                return;
-            }
-            if (priceBelow && !validateMultiPrice(priceBelow)) {
-                showMessage('价格下跌值格式错误', 3000, 'error');
-                return;
-            }
-
-            // 更新设置
-            settings.goldPriceAbove = priceAbove || '';
-            settings.goldPriceBelow = priceBelow || '';
-            settings.goldDailyChangePercent = isNaN(dailyChange) || dailyChange <= 0 ? 0 : dailyChange;
-            settings.goldChangePercent = isNaN(changePercent) || changePercent <= 0 ? 0 : changePercent;
-
-            // 保存到插件
-            try {
-                await plugin.saveSettings(settings);
-                showMessage('预警设置已保存', 2000);
-                await loadData(); // 刷新显示
-            } catch (e) {
-                showMessage('保存失败: ' + e, 3000, 'error');
-            }
-
-            dialog.destroy();
-        });
-
-        // 取消按钮
-        cancelBtn.addEventListener('click', () => {
-            dialog.destroy();
-        });
-    }
-
-    // 验证多价格格式
-    function validateMultiPrice(priceStr: string): boolean {
-        if (!priceStr) return true;
-        const prices = priceStr.split(/[,，]/).map(p => p.trim()).filter(p => p);
-        for (const price of prices) {
-            const num = parseFloat(price);
-            if (isNaN(num) || num <= 0) {
-                return false;
-            }
-        }
-        return true;
     }
 
     // 初始化 ECharts
     function initChart() {
-        if (!chartContainer) return;
+        if (!chartContainer) {
+            console.log('[FinancePanel] 图表容器不存在，跳过初始化');
+            return;
+        }
         
-        chartInstance = echarts.init(chartContainer);
-        updateChart();
+        // 如果已有实例，先销毁
+        if (chartInstance) {
+            chartInstance.dispose();
+            chartInstance = null;
+        }
         
-        // 响应窗口大小变化
-        window.addEventListener('resize', handleResize);
+        try {
+            chartInstance = echarts.init(chartContainer);
+            console.log('[FinancePanel] 图表初始化成功');
+            updateChart();
+            
+            window.addEventListener('resize', handleResize);
+        } catch (e) {
+            console.error('[FinancePanel] 图表初始化失败:', e);
+        }
     }
 
     // 销毁图表
     function destroyChart() {
         window.removeEventListener('resize', handleResize);
         if (chartInstance) {
-            chartInstance.dispose();
+            try {
+                chartInstance.dispose();
+            } catch (e) {
+                console.error('[FinancePanel] 销毁图表失败:', e);
+            }
             chartInstance = null;
         }
     }
@@ -231,14 +143,22 @@
 
     // 更新图表数据
     function updateChart() {
-        if (!chartInstance || !filteredData.length) return;
+        if (!chartInstance) {
+            console.log('[FinancePanel] 图表实例不存在，尝试重新初始化');
+            initChart();
+            return;
+        }
+        
+        if (!filteredData || filteredData.length === 0) {
+            console.log('[FinancePanel] 无数据，跳过图表更新');
+            return;
+        }
 
-        const color = '#d4a951'; // 曲线颜色
+        const color = '#d4a951';
         
         const dates = filteredData.map(d => formatDate(d.timestamp));
-        const prices = filteredData.map(d => d.midprice);
+        const prices = filteredData.map(d => d.price);
         
-
         const option: echarts.EChartsOption = {
             backgroundColor: 'transparent',
             grid: {
@@ -258,9 +178,8 @@
                     const data = filteredData[params[0].dataIndex];
                     return `
                         <div style="font-weight:600;margin-bottom:4px">${params[0].axisValue}</div>
-                        <div>中间价: <span style="color:${color};font-weight:600">${data.midprice.toFixed(2)}</span></div>
-                        <div>买入: ${data.buyprice.toFixed(2)} | 卖出: ${data.sellprice.toFixed(2)}</div>
-                        <div>最高: ${data.maxprice.toFixed(2)} | 最低: ${data.minprice.toFixed(2)}</div>
+                        <div>价格: <span style="color:${color};font-weight:600">${data.price.toFixed(2)}</span></div>
+                        <div>涨跌幅: ${data.changePercent > 0 ? '+' : ''}${data.changePercent.toFixed(2)}%</div>
                     `;
                 }
             },
@@ -315,7 +234,7 @@
             },
             series: [
                 {
-                    name: '中间价',
+                    name: '价格',
                     type: 'line',
                     data: prices,
                     smooth: true,
@@ -335,23 +254,18 @@
                             {
                                 type: 'max',
                                 name: '最高',
-                                itemStyle: { color: '#ff4d4f' }, // 红色
-                                label: {
-                                    formatter: '{c}'
-                                }
+                                itemStyle: { color: '#ff4d4f' },
+                                label: { formatter: '{c}' }
                             },
                             {
                                 type: 'min',
                                 name: '最低',
-                                itemStyle: { color: '#52c41a' }, // 绿色
-                                label: {
-                                    formatter: '{c}'
-                                }
+                                itemStyle: { color: '#52c41a' },
+                                label: { formatter: '{c}' }
                             }
                         ]
                     }
                 },
-
             ]
         };
 
@@ -361,33 +275,98 @@
     async function loadData() {
         loading = true;
         try {
-            settings = await plugin.loadSettings();
+            // 只加载一次设置，后续使用缓存
+            if (!settings || Object.keys(settings.metals || {}).length === 0) {
+                settings = await plugin.loadSettings();
+            }
+            // 更新 currentPrices
+            const newPrices = plugin.getCurrentPrices();
+            if (newPrices.size > 0) {
+                currentPrices = new Map(newPrices);
+            }
+            await loadHistoryData();
         } catch (e) {
-            showMessage('加载设置失败: ' + e);
+            console.error('加载数据失败:', e);
         } finally {
-            // 无论设置加载成功与否，都刷新历史数据
-            refreshHistoryData();
             loading = false;
+        }
+    }
+
+    async function loadHistoryData() {
+        if (selectedMetal) {
+            historyData = await plugin.getMetalHistory(selectedMetal);
+        }
+    }
+
+    // 切换选中品种
+    async function selectMetal(metalName: string) {
+        if (selectedMetal === metalName) return; // 避免重复切换
+        selectedMetal = metalName;
+        await loadHistoryData();
+        // 切换品种后刷新图表
+        if (chartInstance) {
+            updateChart();
         }
     }
 
     function startAutoRefresh() {
         if (autoRefresh) clearInterval(autoRefresh);
         autoRefresh = window.setInterval(() => {
-            // 刷新设置和历史数据
-            loadData();
-            // 额外刷新历史数据以确保数据最新
-            refreshHistoryData();
-        }, 30000); // 每30秒刷新一次
+            // 只有页面可见时才刷新
+            if (isVisible) {
+                refreshDisplayData();
+            }
+        }, 10000); // 每10秒刷新一次显示
+    }
+
+    // 只刷新显示数据，不重新加载设置
+    async function refreshDisplayData() {
+        // 更新 currentPrices
+        const newPrices = plugin.getCurrentPrices();
+        if (newPrices.size > 0) {
+            currentPrices = new Map(newPrices);
+        }
+        // 只在有当前选中品种数据时才刷新历史数据
+        if (selectedMetal && currentPrices.has(selectedMetal)) {
+            await loadHistoryData();
+        }
+    }
+
+    // 处理页面可见性变化
+    function handleVisibilityChange() {
+        const wasVisible = isVisible;
+        isVisible = document.visibilityState === 'visible';
+        
+        if (isVisible && !wasVisible) {
+            // 页面重新可见，刷新数据并重绘图表
+            console.log('[FinancePanel] 页面重新可见，刷新数据');
+            refreshDisplayData();
+            // 延迟重绘图表，确保容器已正确渲染
+            setTimeout(() => {
+                if (chartInstance) {
+                    chartInstance.resize();
+                    updateChart();
+                } else {
+                    initChart();
+                }
+            }, 200);
+        }
     }
 
     onMount(() => {
-        // 先刷新历史数据（同步操作，确保初始数据加载）
-        refreshHistoryData();
         loadData();
         startAutoRefresh();
-        // 延迟初始化图表，确保DOM已准备好
         setTimeout(initChart, 100);
+        
+        // 监听页面可见性变化
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+    });
+
+    onDestroy(() => {
+        if (autoRefresh) clearInterval(autoRefresh);
+        if (visibilityCheckInterval) clearInterval(visibilityCheckInterval);
+        destroyChart();
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
     });
 
     // 手动查询
@@ -395,9 +374,11 @@
         loading = true;
         try {
             await plugin.manualQuery();
-            // 查询完成后刷新历史数据
-            refreshHistoryData();
-            // 强制刷新图表
+            // 更新当前价格数据
+            const newPrices = plugin.getCurrentPrices();
+            currentPrices = new Map(newPrices);
+            await loadHistoryData();
+            // 刷新图表
             if (chartInstance) {
                 updateChart();
             }
@@ -409,28 +390,190 @@
         }
     }
 
-    onDestroy(() => {
-        if (autoRefresh) clearInterval(autoRefresh);
-        destroyChart();
-    });
-
-    // 打开插件设置
-    function openPluginSetting() {
-        plugin.openSetting?.();
+    // 切换品种启用状态
+    async function toggleMetal(metalName: string, enabled: boolean) {
+        const config = settings.metals[metalName] || { enabled: false, priceAbove: '', priceBelow: '', dailyChangePercent: 3, changePercent: 2 };
+        config.enabled = enabled;
+        settings.metals[metalName] = config;
+        await plugin.saveSettings(settings);
+        showMessage(`${metalName} ${enabled ? '已启用' : '已禁用'}`, 2000);
     }
+
+    // 更新设置
+    async function updateSetting(key: keyof FinanceSettings, value: any) {
+        (settings as any)[key] = value;
+        await plugin.saveSettings(settings);
+        
+        // 如果修改了查询间隔，需要重启定时器
+        if (key === 'queryInterval' || key === 'autoQuery') {
+            plugin.restartAutoQuery();
+        }
+    }
+
+    // 打开预警设置对话框
+    function openAlertDialog(metalName: string) {
+        const config = settings.metals[metalName];
+        if (!config) return;
+
+        const dialog = new Dialog({
+            title: `设置预警 - ${metalName}`,
+            content: `
+                <div class="b3-dialog__content" style="padding: 20px;">
+                    <div style="margin-bottom: 16px; font-size: 12px; color: var(--b3-theme-on-surface);">
+                        支持用英文逗号(,)或中文逗号(，)分隔多个价格
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">价格上涨至</label>
+                        <input class="b3-text-field fn__block" type="text" id="priceAboveInput" 
+                            placeholder="如：950, 960, 970"
+                            value="${config.priceAbove || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            价格 ≥ 设定值时提醒（支持多个价格，用逗号分隔）
+                        </div>
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">价格下跌至</label>
+                        <input class="b3-text-field fn__block" type="text" id="priceBelowInput" 
+                            placeholder="如：900, 880, 850"
+                            value="${config.priceBelow || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            价格 ≤ 设定值时提醒（支持多个价格，用逗号分隔）
+                        </div>
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">日涨跌幅超 (%)</label>
+                        <input class="b3-text-field fn__block" type="number" id="dailyChangeInput" 
+                            placeholder="如：3" step="0.1"
+                            value="${config.dailyChangePercent || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            当天上涨或下跌超过设定百分比时提醒（每日只通知一次）
+                        </div>
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">价格变化超 (%)</label>
+                        <input class="b3-text-field fn__block" type="number" id="changePercentInput" 
+                            placeholder="如：2" step="0.1"
+                            value="${config.changePercent || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            相比上次查询变化超过设定百分比时提醒
+                        </div>
+                    </div>
+                </div>
+                <div class="b3-dialog__action">
+                    <button class="b3-button b3-button--cancel" id="cancelAlertBtn">取消</button>
+                    <button class="b3-button b3-button--primary" id="saveAlertBtn">保存</button>
+                </div>
+            `,
+            width: '450px'
+        });
+
+        const priceAboveInput = dialog.element.querySelector('#priceAboveInput') as HTMLInputElement;
+        const priceBelowInput = dialog.element.querySelector('#priceBelowInput') as HTMLInputElement;
+        const dailyChangeInput = dialog.element.querySelector('#dailyChangeInput') as HTMLInputElement;
+        const changePercentInput = dialog.element.querySelector('#changePercentInput') as HTMLInputElement;
+        const saveBtn = dialog.element.querySelector('#saveAlertBtn') as HTMLButtonElement;
+        const cancelBtn = dialog.element.querySelector('#cancelAlertBtn') as HTMLButtonElement;
+
+        saveBtn.addEventListener('click', async () => {
+            const priceAbove = priceAboveInput.value.trim();
+            const priceBelow = priceBelowInput.value.trim();
+            const dailyChange = parseFloat(dailyChangeInput.value);
+            const changePercent = parseFloat(changePercentInput.value);
+
+            // 验证价格格式
+            if (priceAbove && !validateMultiPrice(priceAbove)) {
+                showMessage('价格上涨值格式错误', 3000, 'error');
+                return;
+            }
+            if (priceBelow && !validateMultiPrice(priceBelow)) {
+                showMessage('价格下跌值格式错误', 3000, 'error');
+                return;
+            }
+
+            // 更新设置
+            config.priceAbove = priceAbove || '';
+            config.priceBelow = priceBelow || '';
+            config.dailyChangePercent = isNaN(dailyChange) || dailyChange <= 0 ? 0 : dailyChange;
+            config.changePercent = isNaN(changePercent) || changePercent <= 0 ? 0 : changePercent;
+
+            settings.metals[metalName] = config;
+            await plugin.saveSettings(settings);
+            showMessage('预警设置已保存', 2000);
+
+            dialog.destroy();
+        });
+
+        cancelBtn.addEventListener('click', () => {
+            dialog.destroy();
+        });
+    }
+
+    // 验证多价格格式
+    function validateMultiPrice(priceStr: string): boolean {
+        if (!priceStr) return true;
+        const prices = priceStr.split(/[,，]/).map(p => p.trim()).filter(p => p);
+        for (const price of prices) {
+            const num = parseFloat(price);
+            if (isNaN(num) || num <= 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // 清空历史数据
+    function clearHistory(metalName: string) {
+        confirm(
+            '确认清空',
+            `确定要清空 ${metalName} 的所有历史数据吗？此操作不可恢复。`,
+            async () => {
+                await plugin.clearMetalHistory(metalName);
+                if (selectedMetal === metalName) {
+                    historyData = [];
+                }
+                showMessage('历史数据已清空', 2000, 'info');
+            }
+        );
+    }
+
+    // 清空所有历史数据
+    function clearAllHistory() {
+        confirm(
+            '确认清空',
+            '确定要清空所有品种的历史数据吗？此操作不可恢复。',
+            async () => {
+                await plugin.clearAllHistory();
+                historyData = [];
+                showMessage('所有历史数据已清空', 2000, 'info');
+            }
+        );
+    }
+
+    // 获取价格变化样式
+    function getChangeColor(changePercent: number): string {
+        if (changePercent > 0) return '#ff4d4f'; // 红色涨
+        if (changePercent < 0) return '#52c41a'; // 绿色跌
+        return 'var(--b3-theme-on-surface)';
+    }
+
+
 </script>
 
 <div class="finance-history-panel">
     <div class="panel-header">
-        <h2>📈 理财数据监控</h2>
+        <h2>📈 贵金属价格监控</h2>
         <div class="header-controls">
             <button class="b3-button b3-button--primary" on:click={manualQuery} disabled={loading}>
                 {loading ? '查询中...' : '🔍 立即查询'}
             </button>
-            <button class="b3-button b3-button--outline" on:click={loadData} disabled={loading}>
+            <button class="b3-button b3-button--outline" on:click={() => loadData()} disabled={loading}>
                 刷新
             </button>
-            <button class="b3-button b3-button--outline" on:click={openPluginSetting}>
+            <button class="b3-button b3-button--outline" class:active={showSettings} on:click={() => showSettings = !showSettings}>
                 ⚙️ 设置
             </button>
             <button class="b3-button b3-button--text" on:click={onClose}>关闭</button>
@@ -438,168 +581,233 @@
     </div>
 
     <div class="panel-content">
+        <!-- 左侧边栏 -->
         <div class="sidebar">
+            <!-- 设置面板 -->
+            {#if showSettings}
+                <div class="section settings-section">
+                    <h3>⚙️ 全局设置</h3>
+                    
+                    <div class="setting-item">
+                        <label class="setting-label">
+                            <input type="checkbox" checked={settings.autoQuery} on:change={(e) => updateSetting('autoQuery', e.currentTarget.checked)}>
+                            <span>启用自动查询</span>
+                        </label>
+                    </div>
+
+                    <div class="setting-item">
+                        <label class="setting-label" for="queryInterval">查询间隔</label>
+                        <select id="queryInterval" class="b3-select" value={settings.queryInterval} on:change={(e) => updateSetting('queryInterval', parseInt(e.currentTarget.value))}>
+                            {#each intervalOptions as opt}
+                                <option value={opt.value}>{opt.label}</option>
+                            {/each}
+                        </select>
+                    </div>
+
+                    <div class="setting-item">
+                        <label class="setting-label">
+                            <input type="checkbox" checked={settings.notifyOnQuery} on:change={(e) => updateSetting('notifyOnQuery', e.currentTarget.checked)}>
+                            <span>查询后通知</span>
+                        </label>
+                    </div>
+
+                    <div class="setting-item">
+                        <label class="setting-label" for="topBarDisplay">顶栏显示价格</label>
+                        <select id="topBarDisplay" class="b3-select" value={settings.topBarDisplayMetal} on:change={(e) => updateSetting('topBarDisplayMetal', e.currentTarget.value)}>
+                            {#each topBarOptions as opt}
+                                <option value={opt.value}>{opt.label}</option>
+                            {/each}
+                        </select>
+                    </div>
+
+                    <div class="setting-actions">
+                        <button class="b3-button b3-button--small b3-button--outline" on:click={() => clearAllHistory()}>
+                            清空所有数据
+                        </button>
+                    </div>
+                </div>
+            {/if}
+
+            <!-- 品种列表 -->
             <div class="section">
-                <h3>数据概览</h3>
-                <div class="api-status">
-                    <div class="status-row">
-                        <span class="status-label">API状态:</span>
-                        <span class="status-value" class:enabled={settings?.goldEnabled}>
-                            {settings?.goldEnabled ? '✓ 已启用' : '✗ 已禁用'}
-                        </span>
-                    </div>
-                    <div class="status-row">
-                        <span class="status-label">自动查询:</span>
-                        <span class="status-value" class:enabled={settings?.autoQuery}>
-                            {settings?.autoQuery ? '✓ 已开启' : '✗ 已关闭'}
-                        </span>
-                    </div>
-                    <div class="status-row">
-                        <span class="status-label">数据条数:</span>
-                        <span class="status-value">{historyData.length}</span>
-                    </div>
+                <h3>📊 品种列表</h3>
+                <div class="metal-list">
+                    {#each METAL_TYPES as metalName}
+                        {@const priceData = currentPrices.get(metalName)}
+                        {@const config = settings?.metals?.[metalName]}
+                        <div class="metal-item" class:active={selectedMetal === metalName} class:enabled={config?.enabled}>
+                            <div class="metal-header" on:click={() => selectMetal(metalName)} on:keydown={() => {}}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={config?.enabled} 
+                                    on:click|stopPropagation
+                                    on:change={(e) => toggleMetal(metalName, e.currentTarget.checked)}
+                                >
+                                <span class="metal-name">{metalName}</span>
+                            </div>
+                            {#if priceData && priceData.price !== undefined}
+                                <div class="metal-price" on:click={() => selectMetal(metalName)} on:keydown={() => {}}>
+                                    <span class="price-value">{formatPrice(priceData.price)}</span>
+                                    <span class="price-change" style="color: {getChangeColor(priceData.changePercent)}">
+                                        {priceData.changePercent > 0 ? '+' : ''}{priceData.changePercent.toFixed(2)}%
+                                    </span>
+                                </div>
+                            {/if}
+                            {#if config?.enabled}
+                                <div class="metal-actions">
+                                    <button class="action-btn" on:click|stopPropagation={() => openAlertDialog(metalName)} title="预警设置">
+                                        ⚠️
+                                    </button>
+                                    <button class="action-btn" on:click|stopPropagation={() => clearHistory(metalName)} title="清空数据">
+                                        🗑️
+                                    </button>
+                                </div>
+                            {/if}
+                        </div>
+                    {/each}
                 </div>
             </div>
 
-            <div class="section alert-section">
-                <div class="alert-header-row">
-                    <h3>⚠️ 预警设置</h3>
-                    {#if settings}
-                        <button class="edit-alert-btn" on:click={openAlertEditDialog}>编辑</button>
+            <!-- 预警概览 -->
+            {#if selectedMetal && settings?.metals?.[selectedMetal]}
+                {@const config = settings.metals[selectedMetal]}
+                <div class="section alert-overview">
+                    <h3>⚠️ {selectedMetal} - 预警</h3>
+                    {#if config.priceAbove || config.priceBelow || config.dailyChangePercent || config.changePercent}
+                        {#if config.priceAbove}
+                            <div class="alert-row">
+                                <span class="alert-label">涨破:</span>
+                                <span class="alert-value above">{formatMultiPrice(config.priceAbove)}</span>
+                            </div>
+                        {/if}
+                        {#if config.priceBelow}
+                            <div class="alert-row">
+                                <span class="alert-label">跌破:</span>
+                                <span class="alert-value below">{formatMultiPrice(config.priceBelow)}</span>
+                            </div>
+                        {/if}
+                        {#if config.dailyChangePercent}
+                            <div class="alert-row">
+                                <span class="alert-label">日涨跌:</span>
+                                <span class="alert-value">±{config.dailyChangePercent}%</span>
+                            </div>
+                        {/if}
+                        {#if config.changePercent}
+                            <div class="alert-row">
+                                <span class="alert-label">变化:</span>
+                                <span class="alert-value">±{config.changePercent}%</span>
+                            </div>
+                        {/if}
+                        <button class="edit-alert-btn" on:click={() => openAlertDialog(selectedMetal)}>编辑预警</button>
+                    {:else}
+                        <div class="alert-empty">暂无预警设置</div>
+                        <button class="edit-alert-btn" on:click={() => openAlertDialog(selectedMetal)}>添加预警</button>
                     {/if}
                 </div>
-                {#if settings}
-                    {#if settings.goldPriceAbove}
-                        <div class="alert-item">
-                            <span class="alert-label">价格上涨至:</span>
-                            <span class="alert-value above" title={settings.goldPriceAbove}>{formatMultiPrice(settings.goldPriceAbove)}</span>
-                        </div>
-                    {/if}
-                    {#if settings.goldPriceBelow}
-                        <div class="alert-item">
-                            <span class="alert-label">价格下跌至:</span>
-                            <span class="alert-value below" title={settings.goldPriceBelow}>{formatMultiPrice(settings.goldPriceBelow)}</span>
-                        </div>
-                    {/if}
-                    {#if settings.goldDailyChangePercent}
-                        <div class="alert-item">
-                            <span class="alert-label">日涨跌幅超:</span>
-                            <span class="alert-value drop">{settings.goldDailyChangePercent}%</span>
-                        </div>
-                    {/if}
-                    {#if settings.goldChangePercent}
-                        <div class="alert-item">
-                            <span class="alert-label">价格变化超:</span>
-                            <span class="alert-value change">{settings.goldChangePercent}%</span>
-                        </div>
-                    {/if}
-                    {#if !settings.goldPriceAbove && !settings.goldPriceBelow && !settings.goldDailyChangePercent && !settings.goldChangePercent}
-                        <div class="alert-empty">暂无预警设置<br>点击"编辑"按钮添加</div>
-                    {/if}
-                {:else}
-                    <div class="alert-empty">加载中...</div>
-                {/if}
-            </div>
-
-            <div class="section">
-                <h3>当前价格</h3>
-                {#if latestRecord}
-                    <div class="current-price">
-                        <div class="price-main">{formatPrice(latestRecord.midprice)}</div>
-                        <div class="price-time">{latestRecord.date} {latestRecord.time}</div>
-                    </div>
-                {:else}
-                    <div class="no-data-tip">暂无数据</div>
-                {/if}
-            </div>
+            {/if}
         </div>
 
+        <!-- 主内容区 -->
         <div class="main-content">
-            {#if historyData.length}
-                <div class="stats-cards">
-                    <div class="stat-card">
-                        <div class="stat-label">最新价格</div>
-                        <div class="stat-value">{formatPrice(latestRecord?.midprice || 0)}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">最高价</div>
-                        <div class="stat-value high">{formatPrice(latestRecord?.maxprice || 0)}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">最低价</div>
-                        <div class="stat-value low">{formatPrice(latestRecord?.minprice || 0)}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">区间涨跌</div>
-                        <div class="stat-value" class:up={priceStats && priceStats.change > 0} class:down={priceStats && priceStats.change < 0}>
-                            {priceStats ? (priceStats.change > 0 ? '+' : '') + priceStats.change.toFixed(2) : 0}%
+            {#if selectedMetal}
+                {@const priceData = currentPrices.get(selectedMetal)}
+                <div class="metal-detail-header">
+                    <h3>{selectedMetal}</h3>
+                    {#if priceData}
+                        <div class="current-price-display">
+                            <span class="big-price" style="color: {getChangeColor(priceData.changePercent)}">
+                                {formatPrice(priceData.price)}
+                            </span>
+                            <span class="big-change" style="color: {getChangeColor(priceData.changePercent)}">
+                                {priceData.changePercent > 0 ? '+' : ''}{priceData.changePercent.toFixed(2)}%
+                            </span>
                         </div>
-                    </div>
+                    {/if}
                 </div>
 
-                <div class="chart-section">
-                    <div class="chart-header">
-                        <h3>人民币账户黄金 - 价格走势</h3>
-                        <div class="time-range">
-                            {#each [['1d', '1天'], ['7d', '7天'], ['30d', '30天'], ['all', '全部']] as [range, label]}
-                                <button 
-                                    class="range-btn" 
-                                    class:active={chartTimeRange === range}
-                                    on:click={() => chartTimeRange = range}
-                                >
-                                    {label}
-                                </button>
-                            {/each}
+                {#if historyData.length}
+                    <div class="stats-cards">
+                        <div class="stat-card">
+                            <div class="stat-label">最新价格</div>
+                            <div class="stat-value">{formatPrice(latestRecord?.price || 0)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">最高价</div>
+                            <div class="stat-value high">{formatPrice(priceStats?.max || 0)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">最低价</div>
+                            <div class="stat-value low">{formatPrice(priceStats?.min || 0)}</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">区间涨跌</div>
+                            <div class="stat-value" class:up={priceStats && priceStats.change > 0} class:down={priceStats && priceStats.change < 0}>
+                                {priceStats ? (priceStats.change > 0 ? '+' : '') + priceStats.change.toFixed(2) : 0}%
+                            </div>
                         </div>
                     </div>
-                    
-                    <div class="chart-container">
-                        {#if filteredData.length > 1}
-                            <div class="echarts-container" bind:this={chartContainer}></div>
-                        {:else}
-                            <div class="no-data">数据不足，无法绘制图表</div>
-                        {/if}
-                    </div>
-                </div>
 
-                <div class="data-table-section">
-                    <h3>历史数据</h3>
-                    <div class="table-container">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>时间</th>
-                                    <th>中间价</th>
-                                    <th>买入价</th>
-                                    <th>卖出价</th>
-                                    <th>最高价</th>
-                                    <th>最低价</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {#each [...historyData].reverse().slice(0, 50) as record}
-                                    <tr>
-                                        <td>{record.date} {record.time}</td>
-                                        <td class="price">{formatPrice(record.midprice)}</td>
-                                        <td>{formatPrice(record.buyprice)}</td>
-                                        <td>{formatPrice(record.sellprice)}</td>
-                                        <td class="high">{formatPrice(record.maxprice)}</td>
-                                        <td class="low">{formatPrice(record.minprice)}</td>
-                                    </tr>
+                    <div class="chart-section">
+                        <div class="chart-header">
+                            <h4>价格走势</h4>
+                            <div class="time-range">
+                                {#each [['1d', '1天'], ['7d', '7天'], ['30d', '30天'], ['all', '全部']] as [range, label]}
+                                    <button 
+                                        class="range-btn" 
+                                        class:active={chartTimeRange === range}
+                                        on:click={() => chartTimeRange = range}
+                                    >
+                                        {label}
+                                    </button>
                                 {/each}
-                            </tbody>
-                        </table>
+                            </div>
+                        </div>
+                        
+                        <div class="chart-container">
+                            {#if filteredData.length > 1}
+                                <div class="echarts-container" bind:this={chartContainer}></div>
+                            {:else}
+                                <div class="no-data">数据不足，无法绘制图表</div>
+                            {/if}
+                        </div>
                     </div>
-                </div>
+
+                    <div class="data-table-section">
+                        <h4>历史数据</h4>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>价格</th>
+                                        <th>涨跌幅</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {#each [...historyData].reverse().slice(0, 50) as record}
+                                        <tr>
+                                            <td>{record.date} {record.time}</td>
+                                            <td class="price">{formatPrice(record.price)}</td>
+                                            <td class:up={record.changePercent > 0} class:down={record.changePercent < 0}>
+                                                {record.changePercent > 0 ? '+' : ''}{record.changePercent.toFixed(2)}%
+                                            </td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                {:else}
+                    <div class="empty-state">
+                        <div class="empty-icon">📊</div>
+                        <p>暂无 {selectedMetal} 的历史数据</p>
+                        <p class="empty-hint">请等待下次自动查询或点击"立即查询"</p>
+                    </div>
+                {/if}
             {:else}
                 <div class="empty-state">
                     <div class="empty-icon">📈</div>
-                    <p>暂无数据，请等待下次自动查询或点击"立即查询"</p>
-                    {#if !settings?.goldEnabled}
-                        <p class="empty-hint">提示：请在设置中启用黄金API并配置appkey</p>
-                    {:else if !settings?.goldAppkey}
-                        <p class="empty-hint">提示：请在设置中配置API密钥(appkey)</p>
-                    {/if}
+                    <p>请选择一个品种查看详情</p>
                 </div>
             {/if}
         </div>
@@ -631,6 +839,12 @@
         .header-controls {
             display: flex;
             gap: 8px;
+
+            .active {
+                background: var(--b3-theme-primary);
+                color: white;
+                border-color: var(--b3-theme-primary);
+            }
         }
     }
 
@@ -641,7 +855,7 @@
     }
 
     .sidebar {
-        width: 220px;
+        width: 260px;
         padding: 16px;
         border-right: 1px solid var(--b3-border-color);
         overflow-y: auto;
@@ -657,137 +871,167 @@
                 color: var(--b3-theme-on-surface);
             }
         }
-        
-        .api-status {
+
+        .settings-section {
             background: var(--b3-theme-surface);
             padding: 12px;
             border-radius: 8px;
-            
-            .status-row {
-                display: flex;
-                justify-content: space-between;
-                padding: 6px 0;
-                border-bottom: 1px dashed var(--b3-border-color);
-                font-size: 13px;
-                
-                &:last-child {
-                    border-bottom: none;
-                }
-                
-                .status-label {
-                    color: var(--b3-theme-on-surface);
-                }
-                
-                .status-value {
-                    font-weight: 500;
-                    
-                    &.enabled {
-                        color: #52c41a;
+
+            .setting-item {
+                margin-bottom: 12px;
+
+                .setting-label {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 13px;
+                    margin-bottom: 4px;
+
+                    input[type="checkbox"] {
+                        margin: 0;
                     }
-                    
-                    &:not(.enabled) {
-                        color: #ff4d4f;
+                }
+
+                .b3-select {
+                    width: 100%;
+                    font-size: 13px;
+                }
+            }
+
+            .setting-actions {
+                margin-top: 12px;
+                padding-top: 12px;
+                border-top: 1px dashed var(--b3-border-color);
+            }
+        }
+
+        .metal-list {
+            .metal-item {
+                background: var(--b3-theme-surface);
+                border-radius: 6px;
+                padding: 8px 10px;
+                margin-bottom: 6px;
+                cursor: pointer;
+                border: 2px solid transparent;
+                transition: all 0.2s;
+
+                &:hover {
+                    border-color: var(--b3-border-color);
+                }
+
+                &.active {
+                    border-color: var(--b3-theme-primary);
+                }
+
+                &.enabled {
+                    background: rgba(var(--b3-theme-primary-rgb), 0.1);
+                }
+
+                .metal-header {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin-bottom: 4px;
+
+                    input[type="checkbox"] {
+                        margin: 0;
+                    }
+
+                    .metal-name {
+                        font-size: 13px;
+                        font-weight: 500;
+                        flex: 1;
+                    }
+                }
+
+                .metal-price {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding-left: 22px;
+
+                    .price-value {
+                        font-size: 15px;
+                        font-weight: 600;
+                    }
+
+                    .price-change {
+                        font-size: 12px;
+                    }
+                }
+
+                .metal-actions {
+                    display: flex;
+                    gap: 4px;
+                    padding-left: 22px;
+                    margin-top: 6px;
+
+                    .action-btn {
+                        background: none;
+                        border: none;
+                        cursor: pointer;
+                        padding: 2px 4px;
+                        font-size: 12px;
+                        opacity: 0.7;
+
+                        &:hover {
+                            opacity: 1;
+                        }
                     }
                 }
             }
         }
-        
-        .alert-section {
+
+        .alert-overview {
             background: var(--b3-theme-surface);
             padding: 12px;
             border-radius: 8px;
-            
-            .alert-header-row {
+
+            .alert-row {
                 display: flex;
                 justify-content: space-between;
-                align-items: center;
-                margin-bottom: 10px;
-                
-                h3 {
-                    margin: 0;
-                }
-                
-                .edit-alert-btn {
-                    padding: 4px 10px;
-                    font-size: 12px;
-                    border: 1px solid var(--b3-border-color);
-                    border-radius: 4px;
-                    background: var(--b3-theme-background);
-                    cursor: pointer;
-                    color: var(--b3-theme-on-background);
-                    
-                    &:hover {
-                        border-color: var(--b3-theme-primary);
-                        color: var(--b3-theme-primary);
-                    }
-                }
-            }
-            
-            .alert-item {
-                display: flex;
-                justify-content: space-between;
-                padding: 6px 0;
-                border-bottom: 1px dashed var(--b3-border-color);
+                padding: 4px 0;
                 font-size: 12px;
-                
+                border-bottom: 1px dashed var(--b3-border-color);
+
                 &:last-child {
                     border-bottom: none;
                 }
-                
+
                 .alert-label {
                     color: var(--b3-theme-on-surface);
-                    flex-shrink: 0;
                 }
-                
+
                 .alert-value {
-                    font-weight: 600;
-                    margin-left: 8px;
-                    text-align: right;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                    max-width: 100px;
-                    
-                    &.above { color: #52c41a; }
-                    &.below { color: #ff4d4f; }
-                    &.drop { color: #fa8c16; }
-                    &.change { color: #1890ff; }
+                    font-weight: 500;
+
+                    &.above { color: #ff4d4f; }
+                    &.below { color: #52c41a; }
                 }
             }
-            
+
             .alert-empty {
                 font-size: 12px;
                 color: var(--b3-theme-on-surface);
                 text-align: center;
-                padding: 12px 0;
-                line-height: 1.6;
+                padding: 8px 0;
             }
-        }
-        
-        .current-price {
-            background: var(--b3-theme-surface);
-            padding: 16px;
-            border-radius: 8px;
-            text-align: center;
-            
-            .price-main {
-                font-size: 28px;
-                font-weight: 700;
-                color: var(--b3-theme-primary);
-                margin-bottom: 4px;
-            }
-            
-            .price-time {
+
+            .edit-alert-btn {
+                width: 100%;
+                margin-top: 8px;
+                padding: 4px 8px;
                 font-size: 12px;
-                color: var(--b3-theme-on-surface);
+                border: 1px solid var(--b3-border-color);
+                border-radius: 4px;
+                background: var(--b3-theme-background);
+                cursor: pointer;
+
+                &:hover {
+                    border-color: var(--b3-theme-primary);
+                    color: var(--b3-theme-primary);
+                }
             }
-        }
-        
-        .no-data-tip {
-            font-size: 13px;
-            color: var(--b3-theme-on-surface);
-            text-align: center;
-            padding: 16px;
         }
     }
 
@@ -796,6 +1040,36 @@
         padding: 20px;
         overflow-y: auto;
         min-width: 0;
+
+        .metal-detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--b3-border-color);
+
+            h3 {
+                margin: 0;
+                font-size: 18px;
+            }
+
+            .current-price-display {
+                display: flex;
+                align-items: baseline;
+                gap: 12px;
+
+                .big-price {
+                    font-size: 32px;
+                    font-weight: 700;
+                }
+
+                .big-change {
+                    font-size: 18px;
+                    font-weight: 500;
+                }
+            }
+        }
     }
 
     .stats-cards {
@@ -822,8 +1096,8 @@
                 
                 &.high { color: #ff4d4f; }
                 &.low { color: #52c41a; }
-                &.up { color: #52c41a; }
-                &.down { color: #ff4d4f; }
+                &.up { color: #ff4d4f; }
+                &.down { color: #52c41a; }
             }
         }
     }
@@ -832,6 +1106,7 @@
         border-radius: 8px;
         padding: 20px;
         margin-bottom: 24px;
+        background: var(--b3-theme-surface);
         
         .chart-header {
             display: flex;
@@ -839,9 +1114,9 @@
             align-items: center;
             margin-bottom: 16px;
             
-            h3 {
+            h4 {
                 margin: 0;
-                font-size: 16px;
+                font-size: 14px;
             }
             
             .time-range {
@@ -882,8 +1157,8 @@
     }
 
     .data-table-section {
-        h3 {
-            font-size: 16px;
+        h4 {
+            font-size: 14px;
             margin: 0 0 12px 0;
         }
         
@@ -918,8 +1193,8 @@
                 color: var(--b3-theme-primary);
             }
             
-            .high { color: #ff4d4f; }
-            .low { color: #52c41a; }
+            .up { color: #ff4d4f; }
+            .down { color: #52c41a; }
         }
     }
 
@@ -947,4 +1222,7 @@
             opacity: 0.8;
         }
     }
+
+    .up { color: #ff4d4f; }
+    .down { color: #52c41a; }
 </style>

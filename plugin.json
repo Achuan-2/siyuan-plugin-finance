@@ -16,8 +16,8 @@
     "zh_CN": "理财监控"
   },
   "description": {
-    "default": "A finance monitoring plugin supporting multiple APIs and price alerts",
-    "zh_CN": "支持多接口配置和价格预警的理财监控插件"
+    "default": "A precious metals price monitoring plugin scraping ICBC data with alerts",
+    "zh_CN": "爬取工商银行贵金属价格数据，支持多品种监控和价格预警"
   },
   "readme": {
     "default": "README_en_US.md",
