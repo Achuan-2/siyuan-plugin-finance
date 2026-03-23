@@ -163,7 +163,11 @@
         groups = groups.map((group) => {
             const updatedItems = group.items.map((item) => {
                 if (settings[item.key] !== undefined) {
-                    return { ...item, value: settings[item.key] };
+                    // 对于 select 类型，需要将值转换为字符串以匹配 option 的 value
+                    const value = item.type === 'select' 
+                        ? String(settings[item.key]) 
+                        : settings[item.key];
+                    return { ...item, value };
                 }
                 return item;
             });
