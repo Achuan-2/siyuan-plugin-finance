@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { Dialog, showMessage } from 'siyuan';
+    import * as echarts from 'echarts';
     import type { ApiConfig, PriceRecord, AlertRule } from '../types';
 
     export let plugin: any;
@@ -14,6 +15,8 @@
 
     // 图表配置
     let chartTimeRange: '1d' | '7d' | '30d' | 'all' = '1d';
+    let chartContainer: HTMLDivElement;
+    let chartInstance: echarts.ECharts | null = null;
 
     $: selectedApi = apiConfigs.find(a => a.id === selectedApiId);
     $: products = selectedApi ? selectedApi.productTypes : [];
@@ -25,6 +28,11 @@
     $: alertRule = selectedApi && selectedProduct 
         ? (selectedApi.alertRules[selectedProduct] || {})
         : {};
+
+    // 当过滤数据变化时更新图表
+    $: if (chartInstance && filteredData) {
+        updateChart();
+    }
 
     function filterDataByTimeRange(data: PriceRecord[], range: string): PriceRecord[] {
         if (!data.length) return [];
@@ -55,27 +63,6 @@
         return { max, min, avg, first, last, change };
     }
 
-    function getChartPath(data: PriceRecord[]): string {
-        if (!data.length) return '';
-        
-        const prices = data.map(d => d.midprice);
-        const max = Math.max(...prices);
-        const min = Math.min(...prices);
-        const range = max - min || 1;
-        
-        const width = 600;
-        const height = 200;
-        const padding = 20;
-        
-        const points = data.map((d, i) => {
-            const x = padding + (i / (data.length - 1 || 1)) * (width - 2 * padding);
-            const y = height - padding - ((d.midprice - min) / range) * (height - 2 * padding);
-            return `${x},${y}`;
-        }).join(' ');
-        
-        return points;
-    }
-
     function formatPrice(price: number): string {
         return price.toFixed(2);
     }
@@ -83,6 +70,191 @@
     function formatDate(timestamp: number): string {
         const date = new Date(timestamp);
         return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+    }
+
+    // 初始化 ECharts
+    function initChart() {
+        if (!chartContainer) return;
+        
+        chartInstance = echarts.init(chartContainer);
+        updateChart();
+        
+        // 响应窗口大小变化
+        window.addEventListener('resize', handleResize);
+    }
+
+    // 销毁图表
+    function destroyChart() {
+        window.removeEventListener('resize', handleResize);
+        if (chartInstance) {
+            chartInstance.dispose();
+            chartInstance = null;
+        }
+    }
+
+    function handleResize() {
+        chartInstance?.resize();
+    }
+
+    // 更新图表数据
+    function updateChart() {
+        if (!chartInstance || !filteredData.length) return;
+
+        const isUp = priceStats ? priceStats.change >= 0 : true;
+        const color = isUp ? '#52c41a' : '#ff4d4f';
+        
+        const dates = filteredData.map(d => formatDate(d.timestamp));
+        const prices = filteredData.map(d => d.midprice);
+        
+        // 计算移动平均线（5点平均）
+        const ma5 = prices.map((_, i) => {
+            if (i < 4) return null;
+            const sum = prices.slice(i - 4, i + 1).reduce((a, b) => a + b, 0);
+            return sum / 5;
+        });
+
+        const option: echarts.EChartsOption = {
+            backgroundColor: 'transparent',
+            grid: {
+                top: 40,
+                left: 60,
+                right: 40,
+                bottom: 60
+            },
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: 'var(--b3-theme-surface)',
+                borderColor: 'var(--b3-border-color)',
+                textStyle: {
+                    color: 'var(--b3-theme-on-background)'
+                },
+                formatter: (params: any) => {
+                    const data = filteredData[params[0].dataIndex];
+                    return `
+                        <div style="font-weight:600;margin-bottom:4px">${params[0].axisValue}</div>
+                        <div>中间价: <span style="color:${color};font-weight:600">${data.midprice.toFixed(2)}</span></div>
+                        <div>买入: ${data.buyprice.toFixed(2)} | 卖出: ${data.sellprice.toFixed(2)}</div>
+                        <div>最高: ${data.maxprice.toFixed(2)} | 最低: ${data.minprice.toFixed(2)}</div>
+                    `;
+                }
+            },
+            dataZoom: [
+                {
+                    type: 'inside',
+                    start: 0,
+                    end: 100
+                },
+                {
+                    type: 'slider',
+                    show: true,
+                    bottom: 10,
+                    height: 20,
+                    borderColor: 'var(--b3-border-color)',
+                    fillerColor: 'var(--b3-theme-primary-light)',
+                    handleStyle: {
+                        color: 'var(--b3-theme-primary)'
+                    },
+                    textStyle: {
+                        color: 'var(--b3-theme-on-surface)'
+                    }
+                }
+            ],
+            xAxis: {
+                type: 'category',
+                data: dates,
+                axisLine: {
+                    lineStyle: { color: 'var(--b3-border-color)' }
+                },
+                axisLabel: {
+                    color: 'var(--b3-theme-on-surface)',
+                    rotate: 45,
+                    interval: Math.floor(dates.length / 6)
+                }
+            },
+            yAxis: {
+                type: 'value',
+                scale: true,
+                axisLine: {
+                    lineStyle: { color: 'var(--b3-border-color)' }
+                },
+                axisLabel: {
+                    color: 'var(--b3-theme-on-surface)'
+                },
+                splitLine: {
+                    lineStyle: {
+                        color: 'var(--b3-border-color)',
+                        type: 'dashed'
+                    }
+                }
+            },
+            series: [
+                {
+                    name: '中间价',
+                    type: 'line',
+                    data: prices,
+                    smooth: true,
+                    symbol: 'none',
+                    lineStyle: {
+                        color: color,
+                        width: 2
+                    },
+                    areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: isUp ? 'rgba(82, 196, 26, 0.3)' : 'rgba(255, 77, 79, 0.3)' },
+                            { offset: 1, color: isUp ? 'rgba(82, 196, 26, 0.05)' : 'rgba(255, 77, 79, 0.05)' }
+                        ])
+                    },
+                    markLine: {
+                        silent: true,
+                        lineStyle: {
+                            color: 'var(--b3-theme-on-surface)',
+                            type: 'dashed'
+                        },
+                        data: [
+                            {
+                                type: 'average',
+                                name: '平均值',
+                                label: {
+                                    formatter: '平均: {c}'
+                                }
+                            }
+                        ]
+                    },
+                    markPoint: {
+                        data: [
+                            {
+                                type: 'max',
+                                name: '最高',
+                                label: {
+                                    formatter: '{c}'
+                                }
+                            },
+                            {
+                                type: 'min',
+                                name: '最低',
+                                label: {
+                                    formatter: '{c}'
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    name: 'MA5',
+                    type: 'line',
+                    data: ma5,
+                    smooth: true,
+                    symbol: 'none',
+                    lineStyle: {
+                        color: '#1890ff',
+                        width: 1.5,
+                        type: 'dashed'
+                    }
+                }
+            ]
+        };
+
+        chartInstance.setOption(option);
     }
 
     async function loadData() {
@@ -114,6 +286,8 @@
     onMount(() => {
         loadData();
         startAutoRefresh();
+        // 延迟初始化图表，确保DOM已准备好
+        setTimeout(initChart, 100);
     });
 
     // 手动查询当前选中的API
@@ -137,6 +311,7 @@
 
     onDestroy(() => {
         if (autoRefresh) clearInterval(autoRefresh);
+        destroyChart();
     });
 
     // 打开预警设置编辑对话框
@@ -175,12 +350,12 @@
                     </div>
                     
                     <div class="b3-form__item" style="margin-bottom: 16px;">
-                        <label class="b3-form__label">日跌幅超 (%)</label>
+                        <label class="b3-form__label">日涨跌幅超 (%)</label>
                         <input class="b3-text-field fn__block" type="number" id="dailyDropInput" 
                             placeholder="如：3" step="0.1"
-                            value="${currentRule.dailyDropPercent || ''}">
+                            value="${currentRule.dailyChangePercent || ''}">
                         <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
-                            从当天最高价下跌超过设定百分比时提醒
+                            当天上涨或下跌超过设定百分比时提醒（每日只通知一次）
                         </div>
                     </div>
                     
@@ -223,9 +398,9 @@
                 newRule.priceBelow = priceBelow;
             }
             
-            const dailyDrop = parseFloat(dailyDropInput.value);
-            if (!isNaN(dailyDrop) && dailyDrop > 0) {
-                newRule.dailyDropPercent = dailyDrop;
+            const dailyChange = parseFloat(dailyDropInput.value);
+            if (!isNaN(dailyChange) && dailyChange > 0) {
+                newRule.dailyChangePercent = dailyChange;
             }
             
             const changePercent = parseFloat(changePercentInput.value);
@@ -320,10 +495,15 @@
                             <span class="alert-value below">{alertRule.priceBelow}</span>
                         </div>
                     {/if}
-                    {#if alertRule.dailyDropPercent}
+                    {#if alertRule.dailyChangePercent}
                         <div class="alert-item">
-                            <span class="alert-label">日跌幅超:</span>
-                            <span class="alert-value drop">{alertRule.dailyDropPercent}%</span>
+                            <span class="alert-label">日涨跌幅超:</span>
+                            <span class="alert-value drop">{alertRule.dailyChangePercent}%</span>
+                            {#if alertRule.lastAlertDate}
+                                <span style="font-size: 11px; color: var(--b3-theme-on-surface); margin-left: 8px;">
+                                    (今日已通知)
+                                </span>
+                            {/if}
                         </div>
                     {/if}
                     {#if alertRule.changePercent}
@@ -380,36 +560,7 @@
                     
                     <div class="chart-container">
                         {#if filteredData.length > 1}
-                            <svg viewBox="0 0 600 200" class="price-chart">
-                                <!-- 网格线 -->
-                                <line x1="20" y1="20" x2="580" y2="20" stroke="var(--b3-border-color)" stroke-dasharray="2,2"/>
-                                <line x1="20" y1="100" x2="580" y2="100" stroke="var(--b3-border-color)" stroke-dasharray="2,2"/>
-                                <line x1="20" y1="180" x2="580" y2="180" stroke="var(--b3-border-color)" stroke-dasharray="2,2"/>
-                                
-                                <!-- 价格线 -->
-                                <polyline 
-                                    points={getChartPath(filteredData)}
-                                    fill="none"
-                                    stroke={priceStats && priceStats.change >= 0 ? '#52c41a' : '#ff4d4f'}
-                                    stroke-width="2"
-                                />
-                                
-                                <!-- 当前价格点 -->
-                                {#if filteredData.length}
-                                    {@const lastPoint = filteredData[filteredData.length - 1]}
-                                    {@const prices = filteredData.map(d => d.midprice)}
-                                    {@const max = Math.max(...prices)}
-                                    {@const min = Math.min(...prices)}
-                                    {@const range = max - min || 1}
-                                    {@const x = 20 + ((filteredData.length - 1) / (filteredData.length - 1 || 1)) * 560}
-                                    {@const y = 200 - 20 - ((lastPoint.midprice - min) / range) * 160}
-                                    <circle cx={x} cy={y} r="4" fill="#1890ff"/>
-                                {/if}
-                            </svg>
-                            <div class="chart-labels">
-                                <span class="label-left">{formatDate(filteredData[0]?.timestamp || 0)}</span>
-                                <span class="label-right">{formatDate(filteredData[filteredData.length - 1]?.timestamp || 0)}</span>
-                            </div>
+                            <div class="echarts-container" bind:this={chartContainer}></div>
                         {:else}
                             <div class="no-data">数据不足，无法绘制图表</div>
                         {/if}
@@ -679,21 +830,13 @@
         }
         
         .chart-container {
-            .price-chart {
+            .echarts-container {
                 width: 100%;
-                height: 200px;
-            }
-            
-            .chart-labels {
-                display: flex;
-                justify-content: space-between;
-                font-size: 12px;
-                color: var(--b3-theme-on-surface);
-                margin-top: 8px;
+                height: 320px;
             }
             
             .no-data {
-                height: 200px;
+                height: 320px;
                 display: flex;
                 align-items: center;
                 justify-content: center;

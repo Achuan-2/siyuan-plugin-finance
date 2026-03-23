@@ -16,7 +16,7 @@ export const getDefaultSettings = (): FinanceSettings => ({
                 '人民币账户黄金': {
                     priceAbove: 950,
                     priceBelow: 900,
-                    dailyDropPercent: 3,
+                    dailyChangePercent: 3,
                     changePercent: 2
                 }
             },

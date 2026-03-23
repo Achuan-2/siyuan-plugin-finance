@@ -278,6 +278,10 @@ export default class FinancePlugin extends Plugin {
         const notifications: AlertNotification[] = [];
         const currentPrice = record.midprice;
         const lastPrice = apiConfig.lastPrices[productType];
+        const today = record.date; // 当前日期字符串 YYYY-MM-DD
+
+        // 检查今日是否已发送过日涨跌幅通知
+        const dailyAlertSentToday = alertRule.lastAlertDate === today;
 
         // 1. 检查价格涨到多少
         if (alertRule.priceAbove && currentPrice >= alertRule.priceAbove) {
@@ -311,19 +315,42 @@ export default class FinancePlugin extends Plugin {
             }
         }
 
-        // 3. 检查当天跌幅（根据当前值比最大值的跌幅）
-        if (alertRule.dailyDropPercent && record.maxprice > 0) {
-            const dropPercent = ((record.maxprice - currentPrice) / record.maxprice) * 100;
-            if (dropPercent >= alertRule.dailyDropPercent) {
+        // 3. 检查当天涨跌幅（根据最低价和最高价计算涨跌幅度）
+        // 一天只通知一次
+        if (alertRule.dailyChangePercent && !dailyAlertSentToday) {
+            let changePercent = 0;
+            let direction = '';
+            
+            // 基于当日最高价计算跌幅
+            if (record.maxprice > 0) {
+                const dropPercent = ((record.maxprice - currentPrice) / record.maxprice) * 100;
+                if (dropPercent >= alertRule.dailyChangePercent) {
+                    changePercent = dropPercent;
+                    direction = '下跌';
+                }
+            }
+            
+            // 基于当日最低价计算涨幅
+            if (record.minprice > 0 && direction === '') {
+                const risePercent = ((currentPrice - record.minprice) / record.minprice) * 100;
+                if (risePercent >= alertRule.dailyChangePercent) {
+                    changePercent = risePercent;
+                    direction = '上涨';
+                }
+            }
+            
+            if (direction !== '') {
                 notifications.push({
-                    type: 'dailyDrop',
+                    type: 'dailyChange',
                     productName: productType,
                     apiName: apiConfig.name,
                     currentPrice,
-                    percent: dropPercent,
-                    message: `${productType} 当天已从最高价 ${record.maxprice} 下跌 ${dropPercent.toFixed(2)}%，超过设定值 ${alertRule.dailyDropPercent}%`,
+                    percent: changePercent,
+                    message: `${productType} 当天已${direction} ${changePercent.toFixed(2)}%，超过设定值 ${alertRule.dailyChangePercent}%`,
                     timestamp: Date.now()
                 });
+                // 记录今日已发送通知
+                alertRule.lastAlertDate = today;
             }
         }
 

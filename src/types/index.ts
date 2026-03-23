@@ -35,10 +35,12 @@ export interface AlertRule {
     priceAbove?: number;
     // 价格跌到多少提醒
     priceBelow?: number;
-    // 当天涨幅超过百分之几提醒（根据当前值比最大值）
-    dailyDropPercent?: number;
+    // 当天涨跌幅超过百分之几提醒（根据开盘价计算涨跌）
+    dailyChangePercent?: number;
     // 比上次涨幅超过百分之几提醒
     changePercent?: number;
+    // 最后通知日期（用于限制每日只通知一次）
+    lastAlertDate?: string;
 }
 
 // 接口配置
@@ -71,7 +73,7 @@ export interface FinanceSettings {
 
 // 预警通知信息
 export interface AlertNotification {
-    type: 'priceAbove' | 'priceBelow' | 'dailyDrop' | 'changePercent';
+    type: 'priceAbove' | 'priceBelow' | 'dailyChange' | 'changePercent';
     productName: string;
     apiName: string;
     currentPrice: number;

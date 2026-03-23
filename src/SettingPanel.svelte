@@ -324,12 +324,12 @@
                                                 </div>
                                                 
                                                 <div class="rule-row">
-                                                    <label>日跌幅超百分之几（留空不启用）</label>
+                                                    <label>日涨跌幅超百分之几（留空不启用）</label>
                                                     <input type="number" class="b3-text-field" 
-                                                        bind:value={editingRule.dailyDropPercent} 
+                                                        bind:value={editingRule.dailyChangePercent} 
                                                         placeholder="如：3"
                                                         step="0.1">
-                                                    <span class="unit">% (根据当前值比最大值的跌幅)</span>
+                                                    <span class="unit">% (每日只通知一次)</span>
                                                 </div>
                                                 
                                                 <div class="rule-row">
@@ -377,7 +377,7 @@
                                     {@const rule = api.alertRules[product] || {}}
                                     <div class="product-tag">
                                         {product}
-                                        {#if rule.priceAbove || rule.priceBelow || rule.dailyDropPercent || rule.changePercent}
+                                        {#if rule.priceAbove || rule.priceBelow || rule.dailyChangePercent || rule.changePercent}
                                             <span class="alert-badge">⚠️</span>
                                         {/if}
                                     </div>
