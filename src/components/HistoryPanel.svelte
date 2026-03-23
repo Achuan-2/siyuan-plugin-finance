@@ -445,6 +445,11 @@
         if (autoRefresh) clearInterval(autoRefresh);
         destroyChart();
     });
+
+    // 打开插件设置
+    function openPluginSetting() {
+        plugin.openSetting?.();
+    }
 </script>
 
 <div class="finance-history-panel">
@@ -456,6 +461,9 @@
             </button>
             <button class="b3-button b3-button--outline" on:click={loadData} disabled={loading}>
                 刷新
+            </button>
+            <button class="b3-button b3-button--outline" on:click={openPluginSetting}>
+                ⚙️ 设置
             </button>
             <button class="b3-button b3-button--text" on:click={onClose}>关闭</button>
         </div>
