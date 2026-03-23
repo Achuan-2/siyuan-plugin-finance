@@ -46,6 +46,8 @@ export interface ApiConfig {
     id: string;
     name: string;
     url: string;
+    // API密钥（如极速数据的appkey）
+    appkey?: string;
     enabled: boolean;
     // 要监控的产品类型，如"人民币账户黄金"
     productTypes: string[];

@@ -8,7 +8,8 @@ export const getDefaultSettings = (): FinanceSettings => ({
         {
             id: 'default-gold',
             name: '极速数据黄金API',
-            url: 'https://api.jisuapi.com/gold/bank?appkey=acf41529a4aef5f5',
+            url: 'https://api.jisuapi.com/gold/bank',
+            appkey: '',  // 用户需要自行填写
             enabled: true,
             productTypes: ['人民币账户黄金'],
             alertRules: {

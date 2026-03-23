@@ -3,7 +3,7 @@
     import SettingPanel from '@/libs/components/setting-panel.svelte';
     import { i18n } from './pluginInstance';
     import { getDefaultSettings } from './defaultSettings';
-    import { confirm, showMessage } from 'siyuan';
+    import { confirm, showMessage, Dialog } from 'siyuan';
     import type { ApiConfig, AlertRule } from './types';
     
     export let plugin;
@@ -74,11 +74,60 @@
 
     function addProductType() {
         if (!editingApi) return;
-        const name = prompt('请输入产品名称（如：人民币账户黄金）:');
-        if (name && !editingApi.productTypes.includes(name)) {
+        
+        // 使用思源 Dialog 代替 prompt
+        let dialog = new Dialog({
+            title: '添加监控产品',
+            content: `
+                <div class="b3-dialog__content" style="padding: 20px;">
+                    <div class="b3-form__item">
+                        <label class="b3-form__label">产品名称</label>
+                        <input class="b3-text-field fn__block" type="text" id="productNameInput" placeholder="如：人民币账户黄金">
+                    </div>
+                </div>
+                <div class="b3-dialog__action">
+                    <button class="b3-button b3-button--cancel" id="cancelBtn">取消</button>
+                    <button class="b3-button b3-button--primary" id="confirmBtn">确定</button>
+                </div>
+            `,
+            width: '400px'
+        });
+
+        const inputEl = dialog.element.querySelector('#productNameInput') as HTMLInputElement;
+        const confirmBtn = dialog.element.querySelector('#confirmBtn') as HTMLButtonElement;
+        const cancelBtn = dialog.element.querySelector('#cancelBtn') as HTMLButtonElement;
+
+        // 自动聚焦输入框
+        setTimeout(() => inputEl?.focus(), 100);
+
+        // 确认按钮
+        confirmBtn.addEventListener('click', () => {
+            const name = inputEl.value.trim();
+            if (!name) {
+                showMessage('请输入产品名称', 3000, 'error');
+                return;
+            }
+            if (editingApi.productTypes.includes(name)) {
+                showMessage('该产品已存在', 3000, 'error');
+                return;
+            }
             editingApi.productTypes = [...editingApi.productTypes, name];
             editingApi.alertRules[name] = {};
-        }
+            dialog.destroy();
+            showMessage('产品添加成功', 2000);
+        });
+
+        // 取消按钮
+        cancelBtn.addEventListener('click', () => {
+            dialog.destroy();
+        });
+
+        // 按 Enter 确认
+        inputEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                confirmBtn.click();
+            }
+        });
     }
 
     function removeProductType(product: string) {
@@ -212,6 +261,13 @@
                         <div class="form-row">
                             <label>API地址</label>
                             <input type="text" class="b3-text-field" bind:value={editingApi.url} placeholder="https://api.example.com/data">
+                            <div class="field-hint">不需要包含appkey参数，appkey请填写在下方</div>
+                        </div>
+
+                        <div class="form-row">
+                            <label>API密钥 (appkey)</label>
+                            <input type="text" class="b3-text-field" bind:value={editingApi.appkey} placeholder="请输入您的appkey">
+                            <div class="field-hint">极速数据等需要appkey的API请在此填写，留空则不添加</div>
                         </div>
 
                         <div class="form-row">
@@ -486,6 +542,12 @@
                         display: flex;
                         align-items: center;
                         gap: 8px;
+                    }
+                    
+                    .field-hint {
+                        font-size: 12px;
+                        color: var(--b3-theme-on-surface);
+                        margin-top: 4px;
                     }
                     
                     .products-header {

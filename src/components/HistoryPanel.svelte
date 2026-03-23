@@ -13,7 +13,7 @@
     let autoRefresh: number | null = null;
 
     // 图表配置
-    let chartTimeRange: '1d' | '7d' | '30d' | 'all' = '7d';
+    let chartTimeRange: '1d' | '7d' | '30d' | 'all' = '1d';
 
     $: selectedApi = apiConfigs.find(a => a.id === selectedApiId);
     $: products = selectedApi ? selectedApi.productTypes : [];
@@ -116,17 +116,158 @@
         startAutoRefresh();
     });
 
+    // 手动查询当前选中的API
+    async function manualQuery() {
+        if (!selectedApi) {
+            showMessage('请先选择一个接口', 3000, 'error');
+            return;
+        }
+        
+        loading = true;
+        try {
+            await plugin.manualQuery();
+            await loadData(); // 重新加载数据
+            showMessage('查询完成', 2000);
+        } catch (e) {
+            showMessage('查询失败: ' + e, 3000, 'error');
+        } finally {
+            loading = false;
+        }
+    }
+
     onDestroy(() => {
         if (autoRefresh) clearInterval(autoRefresh);
     });
+
+    // 打开预警设置编辑对话框
+    function openAlertEditDialog() {
+        if (!selectedApi || !selectedProduct) return;
+        
+        // 获取当前规则，如果不存在则创建空规则
+        const currentRule: AlertRule = { ...alertRule };
+        
+        const dialog = new Dialog({
+            title: `设置预警 - ${selectedProduct}`,
+            content: `
+                <div class="b3-dialog__content" style="padding: 20px;">
+                    <div style="margin-bottom: 16px; font-size: 12px; color: var(--b3-theme-on-surface);">
+                        留空表示不启用该预警
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">价格上涨至</label>
+                        <input class="b3-text-field fn__block" type="number" id="priceAboveInput" 
+                            placeholder="如：950" step="0.01" 
+                            value="${currentRule.priceAbove || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            价格 ≥ 设定值时提醒（首次触发）
+                        </div>
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">价格下跌至</label>
+                        <input class="b3-text-field fn__block" type="number" id="priceBelowInput" 
+                            placeholder="如：900" step="0.01"
+                            value="${currentRule.priceBelow || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            价格 ≤ 设定值时提醒（首次触发）
+                        </div>
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">日跌幅超 (%)</label>
+                        <input class="b3-text-field fn__block" type="number" id="dailyDropInput" 
+                            placeholder="如：3" step="0.1"
+                            value="${currentRule.dailyDropPercent || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            从当天最高价下跌超过设定百分比时提醒
+                        </div>
+                    </div>
+                    
+                    <div class="b3-form__item" style="margin-bottom: 16px;">
+                        <label class="b3-form__label">价格变化超 (%)</label>
+                        <input class="b3-text-field fn__block" type="number" id="changePercentInput" 
+                            placeholder="如：2" step="0.1"
+                            value="${currentRule.changePercent || ''}">
+                        <div style="font-size: 12px; color: var(--b3-theme-on-surface); margin-top: 4px;">
+                            相比上次查询变化超过设定百分比时提醒
+                        </div>
+                    </div>
+                </div>
+                <div class="b3-dialog__action">
+                    <button class="b3-button b3-button--cancel" id="cancelAlertBtn">取消</button>
+                    <button class="b3-button b3-button--primary" id="saveAlertBtn">保存</button>
+                </div>
+            `,
+            width: '450px'
+        });
+
+        const priceAboveInput = dialog.element.querySelector('#priceAboveInput') as HTMLInputElement;
+        const priceBelowInput = dialog.element.querySelector('#priceBelowInput') as HTMLInputElement;
+        const dailyDropInput = dialog.element.querySelector('#dailyDropInput') as HTMLInputElement;
+        const changePercentInput = dialog.element.querySelector('#changePercentInput') as HTMLInputElement;
+        const saveBtn = dialog.element.querySelector('#saveAlertBtn') as HTMLButtonElement;
+        const cancelBtn = dialog.element.querySelector('#cancelAlertBtn') as HTMLButtonElement;
+
+        // 保存按钮
+        saveBtn.addEventListener('click', async () => {
+            const newRule: AlertRule = {};
+            
+            const priceAbove = parseFloat(priceAboveInput.value);
+            if (!isNaN(priceAbove) && priceAbove > 0) {
+                newRule.priceAbove = priceAbove;
+            }
+            
+            const priceBelow = parseFloat(priceBelowInput.value);
+            if (!isNaN(priceBelow) && priceBelow > 0) {
+                newRule.priceBelow = priceBelow;
+            }
+            
+            const dailyDrop = parseFloat(dailyDropInput.value);
+            if (!isNaN(dailyDrop) && dailyDrop > 0) {
+                newRule.dailyDropPercent = dailyDrop;
+            }
+            
+            const changePercent = parseFloat(changePercentInput.value);
+            if (!isNaN(changePercent) && changePercent > 0) {
+                newRule.changePercent = changePercent;
+            }
+
+            // 更新规则
+            selectedApi!.alertRules[selectedProduct!] = newRule;
+            
+            // 保存设置
+            try {
+                const settings = await plugin.loadSettings();
+                const apiIndex = settings.apiConfigs.findIndex((a: ApiConfig) => a.id === selectedApi!.id);
+                if (apiIndex !== -1) {
+                    settings.apiConfigs[apiIndex] = selectedApi!;
+                    await plugin.saveSettings(settings);
+                    showMessage('预警设置已保存', 2000);
+                }
+            } catch (e) {
+                showMessage('保存失败: ' + e, 3000, 'error');
+            }
+            
+            dialog.destroy();
+        });
+
+        // 取消按钮
+        cancelBtn.addEventListener('click', () => {
+            dialog.destroy();
+        });
+    }
 </script>
 
 <div class="finance-history-panel">
     <div class="panel-header">
         <h2>📈 理财数据监控</h2>
         <div class="header-controls">
+            <button class="b3-button b3-button--primary" on:click={manualQuery} disabled={loading}>
+                {loading ? '查询中...' : '🔍 立即查询'}
+            </button>
             <button class="b3-button b3-button--outline" on:click={loadData} disabled={loading}>
-                {loading ? '加载中...' : '刷新'}
+                刷新
             </button>
             <button class="b3-button b3-button--text" on:click={onClose}>关闭</button>
         </div>
@@ -160,32 +301,39 @@
             </div>
             {/if}
 
-            {#if alertRule && Object.keys(alertRule).length}
+            {#if selectedApi && selectedProduct}
             <div class="section alert-section">
-                <h3>⚠️ 预警设置</h3>
-                {#if alertRule.priceAbove}
-                    <div class="alert-item">
-                        <span class="alert-label">价格上涨至:</span>
-                        <span class="alert-value above">{alertRule.priceAbove}</span>
-                    </div>
-                {/if}
-                {#if alertRule.priceBelow}
-                    <div class="alert-item">
-                        <span class="alert-label">价格下跌至:</span>
-                        <span class="alert-value below">{alertRule.priceBelow}</span>
-                    </div>
-                {/if}
-                {#if alertRule.dailyDropPercent}
-                    <div class="alert-item">
-                        <span class="alert-label">日跌幅超:</span>
-                        <span class="alert-value drop">{alertRule.dailyDropPercent}%</span>
-                    </div>
-                {/if}
-                {#if alertRule.changePercent}
-                    <div class="alert-item">
-                        <span class="alert-label">变化幅度超:</span>
-                        <span class="alert-value change">{alertRule.changePercent}%</span>
-                    </div>
+                <div class="alert-header">
+                    <h3>⚠️ 预警设置</h3>
+                    <button class="edit-alert-btn" on:click={openAlertEditDialog}>编辑</button>
+                </div>
+                {#if alertRule && Object.keys(alertRule).length}
+                    {#if alertRule.priceAbove}
+                        <div class="alert-item">
+                            <span class="alert-label">价格上涨至:</span>
+                            <span class="alert-value above">{alertRule.priceAbove}</span>
+                        </div>
+                    {/if}
+                    {#if alertRule.priceBelow}
+                        <div class="alert-item">
+                            <span class="alert-label">价格下跌至:</span>
+                            <span class="alert-value below">{alertRule.priceBelow}</span>
+                        </div>
+                    {/if}
+                    {#if alertRule.dailyDropPercent}
+                        <div class="alert-item">
+                            <span class="alert-label">日跌幅超:</span>
+                            <span class="alert-value drop">{alertRule.dailyDropPercent}%</span>
+                        </div>
+                    {/if}
+                    {#if alertRule.changePercent}
+                        <div class="alert-item">
+                            <span class="alert-label">变化幅度超:</span>
+                            <span class="alert-value change">{alertRule.changePercent}%</span>
+                        </div>
+                    {/if}
+                {:else}
+                    <div class="alert-empty">暂无预警设置<br>点击"编辑"添加</div>
                 {/if}
             </div>
             {/if}
@@ -395,6 +543,32 @@
             padding: 12px;
             border-radius: 8px;
             
+            .alert-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 10px;
+                
+                h3 {
+                    margin: 0;
+                }
+                
+                .edit-alert-btn {
+                    padding: 4px 10px;
+                    font-size: 12px;
+                    border: 1px solid var(--b3-border-color);
+                    border-radius: 4px;
+                    background: var(--b3-theme-background);
+                    cursor: pointer;
+                    color: var(--b3-theme-on-background);
+                    
+                    &:hover {
+                        border-color: var(--b3-theme-primary);
+                        color: var(--b3-theme-primary);
+                    }
+                }
+            }
+            
             .alert-item {
                 display: flex;
                 justify-content: space-between;
@@ -418,6 +592,14 @@
                     &.drop { color: #fa8c16; }
                     &.change { color: #1890ff; }
                 }
+            }
+            
+            .alert-empty {
+                font-size: 12px;
+                color: var(--b3-theme-on-surface);
+                text-align: center;
+                padding: 12px 0;
+                line-height: 1.6;
             }
         }
     }

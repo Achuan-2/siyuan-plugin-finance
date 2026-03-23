@@ -16,8 +16,7 @@ import {
     openMobileFileById,
     lockScreen,
     ICard,
-    ICardData,
-    fetchSyncPost
+    ICardData
 } from "siyuan";
 
 import "@/index.scss";
@@ -26,6 +25,7 @@ import SettingPanel from "./SettingPanel.svelte";
 import HistoryPanel from "./components/HistoryPanel.svelte";
 import { getDefaultSettings } from "./defaultSettings";
 import { setPluginInstance, i18n } from "./pluginInstance";
+import { sendNotification } from "./api";
 import type { FinanceSettings, ApiConfig, GoldDataItem, GoldApiResponse, PriceRecord, AlertRule, AlertNotification } from "./types";
 
 export const SETTINGS_FILE = "settings.json";
@@ -204,7 +204,14 @@ export default class FinancePlugin extends Plugin {
     private async queryApi(apiConfig: ApiConfig) {
         console.log(`[FinancePlugin] 查询接口: ${apiConfig.name}`);
 
-        const response = await fetch(apiConfig.url);
+        // 构建完整的URL（如果有appkey则追加到URL）
+        let url = apiConfig.url;
+        if (apiConfig.appkey) {
+            const separator = url.includes('?') ? '&' : '?';
+            url = `${url}${separator}appkey=${apiConfig.appkey}`;
+        }
+
+        const response = await fetch(url);
         const data: GoldApiResponse = await response.json();
 
         if (data.status !== 0) {
@@ -339,30 +346,25 @@ export default class FinancePlugin extends Plugin {
 
         // 发送通知
         for (const notification of notifications) {
-            await this.sendNotification(notification);
+            await this.sendAlertNotification(notification);
         }
     }
 
     /**
-     * 发送通知（使用思源的通知API）
+     * 发送通知（使用api.ts的sendNotification）
      */
-    private async sendNotification(notification: AlertNotification) {
+    private async sendAlertNotification(notification: AlertNotification) {
         const title = `⚠️ ${notification.apiName} - ${notification.productName}`;
         const body = notification.message;
 
-        // 使用思源的 pushMsg 发送通知
         try {
-            const response = await fetchSyncPost("/api/notification/pushMsg", {
-                msg: `${title}\n${body}`,
-                timeout: 10000  // 10秒
-            });
-            console.log(`[FinancePlugin] 通知已发送:`, response);
+            await sendNotification(title, body);
+            console.log(`[FinancePlugin] 通知已发送: ${title} - ${body}`);
         } catch (e) {
-            // 如果 pushMsg 失败，使用 showMessage
+            console.error(`[FinancePlugin] 发送通知失败:`, e);
+            // 如果失败，使用 showMessage 作为备选
             showMessage(`${title}\n${body}`, 5000, "error");
         }
-
-        console.log(`[FinancePlugin] 预警通知: ${title} - ${body}`);
     }
 
     /**
